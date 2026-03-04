@@ -1,0 +1,375 @@
+---
+title: Setup guide
+description: Get started with the Currency Converter API by configuring your environment and setting up required services
+---
+
+## Overview
+
+This guide walks you through setting up the Currency Converter API from scratch. You'll configure environment variables, set up Docker containers, and obtain API keys from currency exchange providers.
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+- Docker and Docker Compose installed
+- Git for cloning the repository
+- API keys from at least one currency provider (recommended: all three for redundancy)
+
+## Environment configuration
+
+<Steps>
+  <Step title="Clone the repository">
+    Start by cloning the Currency Converter API repository:
+
+    ```bash
+    git clone https://github.com/yourusername/currency-converter.git
+    cd currency-converter
+    ```
+  </Step>
+
+  <Step title="Copy environment template">
+    The repository includes an example environment file with all required variables:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    This creates your local `.env` file that you'll customize with your specific configuration.
+  </Step>
+
+  <Step title="Configure environment variables">
+    Open the `.env` file and configure the following sections:
+
+    ### Application settings
+
+    ```bash
+    APP_NAME="Currency Converter Service"
+    VERSION="0.1.0"
+    DEBUG=true
+    ENVIRONMENT="development"
+    ```
+
+    ### Server configuration
+
+    ```bash
+    HOST="0.0.0.0"
+    PORT=8000
+    ```
+
+    ### Database configuration
+
+    ```bash
+    DATABASE_URL="postgresql://postgres:password@localhost:5432/currency_converter"
+    DATABASE_ECHO=false
+    ```
+
+    <Note>
+      When running with Docker Compose, replace `localhost` with the service name `db` in the DATABASE_URL.
+    </Note>
+
+    ### Redis configuration
+
+    ```bash
+    REDIS_URL="redis://localhost:6379/0"
+    CACHE_TTL=300  # 5 minutes in seconds
+    ```
+
+    ### API provider settings
+
+    Configure your API keys for the currency exchange providers:
+
+    ```bash
+    # Fixer.io
+    FIXER_API_KEY="your_fixer_api_key_here"
+    FIXER_BASE_URL="http://data.fixer.io/api"
+
+    # OpenExchangeRates
+    OPENEXCHANGE_APP_ID="your_openexchange_app_id_here"
+    OPENEXCHANGE_BASE_URL="https://openexchangerates.org/api"
+
+    # CurrencyAPI
+    CURRENCYAPI_KEY="your_currencyapi_key_here"
+    CURRENCYAPI_BASE_URL="https://api.currencyapi.com/v3"
+    ```
+
+    <Warning>
+      Never commit your `.env` file to version control. It's included in `.gitignore` by default.
+    </Warning>
+  </Step>
+</Steps>
+
+## Obtaining API keys
+
+The Currency Converter API uses multiple providers for redundancy and accuracy. You need to obtain API keys from each provider.
+
+<AccordionGroup>
+  <Accordion title="Fixer.io API key">
+    1. Visit [https://fixer.io/](https://fixer.io/)
+    2. Click "Get Free API Key" or "Sign Up"
+    3. Complete the registration form
+    4. Verify your email address
+    5. Copy your API key from the dashboard
+    6. Add it to your `.env` file as `FIXER_API_KEY`
+
+    **Free tier includes:**
+    - 100 requests per month
+    - Real-time exchange rates
+    - 170+ currencies
+  </Accordion>
+
+  <Accordion title="OpenExchangeRates App ID">
+    1. Visit [https://openexchangerates.org/](https://openexchangerates.org/)
+    2. Click "Sign Up" in the top right
+    3. Choose the "Free" plan
+    4. Complete the registration
+    5. Your App ID will be displayed on the dashboard
+    6. Add it to your `.env` file as `OPENEXCHANGE_APP_ID`
+
+    **Free tier includes:**
+    - 1,000 requests per month
+    - Hourly updates
+    - 200+ currencies
+  </Accordion>
+
+  <Accordion title="CurrencyAPI key">
+    1. Visit [https://currencyapi.com/](https://currencyapi.com/)
+    2. Click "Get Free API Key"
+    3. Sign up with your email
+    4. Verify your account
+    5. Copy the API key from your dashboard
+    6. Add it to your `.env` file as `CURRENCYAPI_KEY`
+
+    **Free tier includes:**
+    - 300 requests per month
+    - Real-time rates
+    - 150+ currencies
+  </Accordion>
+</AccordionGroup>
+
+<Info>
+  While you can run the API with just one provider, using all three ensures maximum reliability and accuracy through rate averaging.
+</Info>
+
+## Docker setup
+
+The Currency Converter API uses Docker Compose to orchestrate multiple services.
+
+<Steps>
+  <Step title="Review docker-compose.yml">
+    The provided `docker-compose.yml` defines three services:
+
+    ```yaml
+    services:
+      db:
+        image: postgres:15
+        container_name: currency-converter-db-compose
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+          POSTGRES_DB: ${POSTGRES_DB}
+        ports:
+          - "5432:5432"
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+
+      redis:
+        image: redis:6
+        container_name: currency-converter-redis-compose
+        ports:
+          - "6379:6379"
+        volumes:
+          - redis_data:/data
+
+    volumes:
+      postgres_data:
+      redis_data:
+    ```
+  </Step>
+
+  <Step title="Start services">
+    Launch all services with a single command:
+
+    ```bash
+    docker-compose -f docker/docker-compose.yml up -d
+    ```
+
+    This command:
+    - Starts PostgreSQL on port 5432
+    - Starts Redis on port 6379
+    - Creates persistent volumes for data
+    - Runs containers in detached mode
+  </Step>
+
+  <Step title="Verify services are running">
+    Check that all containers are healthy:
+
+    ```bash
+    docker-compose -f docker/docker-compose.yml ps
+    ```
+
+    You should see both `db` and `redis` services with status "Up".
+  </Step>
+
+  <Step title="View logs">
+    Monitor service logs to ensure everything is working:
+
+    ```bash
+    # All services
+    docker-compose -f docker/docker-compose.yml logs -f
+
+    # Specific service
+    docker-compose -f docker/docker-compose.yml logs -f db
+    ```
+  </Step>
+</Steps>
+
+## Starting the API
+
+Once your environment is configured and services are running, start the API server.
+
+### Using Docker
+
+```bash
+docker-compose -f docker/docker-compose.yml up --build
+```
+
+### Using Poetry (local development)
+
+If you prefer running locally without Docker:
+
+```bash
+# Install dependencies
+poetry install
+
+# Start the server
+poetry run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Verifying installation
+
+<Steps>
+  <Step title="Check API health">
+    Visit the API documentation to confirm it's running:
+
+    ```bash
+    curl http://localhost:8000/docs
+    ```
+
+    You should see the Swagger UI interface in your browser at `http://localhost:8000/docs`.
+  </Step>
+
+  <Step title="Test supported currencies endpoint">
+    Verify that the API successfully initialized supported currencies:
+
+    ```bash
+    curl http://localhost:8000/api/currencies
+    ```
+
+    Expected response:
+
+    ```json
+    {
+      "currencies": [
+        "USD",
+        "EUR",
+        "GBP",
+        "JPY",
+        "AUD",
+        "CAD",
+        "CHF",
+        "CNY",
+        "SEK",
+        "NZD"
+      ]
+    }
+    ```
+  </Step>
+
+  <Step title="Test a conversion">
+    Make a test conversion request:
+
+    ```bash
+    curl http://localhost:8000/api/convert/USD/EUR/100
+    ```
+
+    You should receive a successful conversion response with the current exchange rate.
+  </Step>
+</Steps>
+
+<Note>
+  On first startup, the API fetches supported currencies from all providers and stores them in the database. This may take a few seconds.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection errors">
+    If you see `Connection refused` errors:
+
+    1. Verify PostgreSQL is running:
+       ```bash
+       docker-compose -f docker/docker-compose.yml ps db
+       ```
+
+    2. Check the DATABASE_URL in your `.env` file
+
+    3. Ensure the hostname matches your Docker service name (usually `db` when using Docker Compose)
+
+    4. Verify credentials match between `.env` and `docker-compose.yml`
+  </Accordion>
+
+  <Accordion title="Redis connection errors">
+    If Redis connections fail:
+
+    1. Check Redis is running:
+       ```bash
+       docker-compose -f docker/docker-compose.yml ps redis
+       ```
+
+    2. Verify REDIS_URL in your `.env` file
+
+    3. Test Redis connection:
+       ```bash
+       docker-compose -f docker/docker-compose.yml exec redis redis-cli ping
+       ```
+
+    Expected response: `PONG`
+  </Accordion>
+
+  <Accordion title="Provider API errors">
+    If you see "Provider unavailable" errors:
+
+    1. Verify your API keys are correct in the `.env` file
+
+    2. Check you haven't exceeded your free tier limits
+
+    3. Test provider connectivity manually:
+       ```bash
+       curl "http://data.fixer.io/api/latest?access_key=YOUR_KEY"
+       ```
+
+    4. Ensure at least one provider is working (the API can function with a single provider)
+  </Accordion>
+
+  <Accordion title="Port conflicts">
+    If ports 8000, 5432, or 6379 are already in use:
+
+    1. Modify the port mappings in `docker-compose.yml`:
+       ```yaml
+       ports:
+         - "5433:5432"  # Use 5433 on host instead
+       ```
+
+    2. Update your `.env` file to match the new ports
+
+    3. Restart the services
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+Now that your Currency Converter API is set up and running:
+
+- Learn how to [use the API](/guides/usage) endpoints
+- Understand [error handling](/guides/error-handling) strategies
+- Optimize performance with [caching](/guides/caching)

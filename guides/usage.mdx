@@ -1,0 +1,442 @@
+---
+title: Usage guide
+description: Learn how to use the Currency Converter API endpoints with real examples
+---
+
+## Overview
+
+The Currency Converter API provides three main endpoints for currency operations. This guide demonstrates how to use each endpoint with practical examples.
+
+## Base URL
+
+All API requests use the following base URL:
+
+```
+http://localhost:8000
+```
+
+<Info>
+  Replace `localhost:8000` with your actual deployment URL in production.
+</Info>
+
+## Authentication
+
+The Currency Converter API does not require authentication for requests. However, you must configure valid provider API keys in your environment variables for the service to function.
+
+## Endpoints
+
+### Convert currency
+
+Convert an amount from one currency to another using current exchange rates.
+
+**Endpoint:** `GET /api/convert/{from_currency}/{to_currency}/{amount}`
+
+**Parameters:**
+
+- `from_currency` (string, required): Source currency code (3-5 characters)
+- `to_currency` (string, required): Target currency code (3-5 characters)
+- `amount` (decimal, required): Amount to convert (must be greater than 0)
+
+**Example request:**
+
+```bash
+curl http://localhost:8000/api/convert/USD/EUR/100
+```
+
+**Example response:**
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "original_amount": 100.00,
+  "converted_amount": 92.50,
+  "exchange_rate": 0.925,
+  "timestamp": "2026-03-04T10:30:00Z",
+  "source": "averaged"
+}
+```
+
+**Response fields:**
+
+- `from_currency`: Source currency code used
+- `to_currency`: Target currency code used
+- `original_amount`: Amount you requested to convert
+- `converted_amount`: Result after applying the exchange rate
+- `exchange_rate`: Rate used for conversion
+- `timestamp`: When the rate was fetched
+- `source`: Provider(s) that supplied the rate
+
+<Steps>
+  <Step title="Convert USD to EUR">
+    ```bash
+    curl http://localhost:8000/api/convert/USD/EUR/100
+    ```
+
+    Response:
+    ```json
+    {
+      "from_currency": "USD",
+      "to_currency": "EUR",
+      "original_amount": 100.00,
+      "converted_amount": 92.50,
+      "exchange_rate": 0.925,
+      "timestamp": "2026-03-04T10:30:00Z",
+      "source": "averaged"
+    }
+    ```
+  </Step>
+
+  <Step title="Convert with decimal amounts">
+    The API supports decimal precision up to 2 places:
+
+    ```bash
+    curl http://localhost:8000/api/convert/GBP/USD/250.75
+    ```
+
+    Response:
+    ```json
+    {
+      "from_currency": "GBP",
+      "to_currency": "USD",
+      "original_amount": 250.75,
+      "converted_amount": 313.44,
+      "exchange_rate": 1.250,
+      "timestamp": "2026-03-04T10:31:00Z",
+      "source": "averaged"
+    }
+    ```
+  </Step>
+
+  <Step title="Large amount conversion">
+    Convert large amounts for business transactions:
+
+    ```bash
+    curl http://localhost:8000/api/convert/EUR/JPY/10000
+    ```
+
+    Response:
+    ```json
+    {
+      "from_currency": "EUR",
+      "to_currency": "JPY",
+      "original_amount": 10000.00,
+      "converted_amount": 1618500.00,
+      "exchange_rate": 161.850,
+      "timestamp": "2026-03-04T10:32:00Z",
+      "source": "averaged"
+    }
+    ```
+  </Step>
+</Steps>
+
+### Get exchange rate
+
+Retrieve the current exchange rate between two currencies without performing a conversion.
+
+**Endpoint:** `GET /api/rate/{from_currency}/{to_currency}`
+
+**Parameters:**
+
+- `from_currency` (string, required): Source currency code (3-5 characters)
+- `to_currency` (string, required): Target currency code (3-5 characters)
+
+**Example request:**
+
+```bash
+curl http://localhost:8000/api/rate/USD/JPY
+```
+
+**Example response:**
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "JPY",
+  "rate": 149.85,
+  "timestamp": "2026-03-04T10:30:00Z",
+  "source": "averaged"
+}
+```
+
+**Response fields:**
+
+- `from_currency`: Source currency code
+- `to_currency`: Target currency code
+- `rate`: Current exchange rate
+- `timestamp`: When the rate was fetched
+- `source`: Provider(s) that supplied the rate
+
+<Accordion title="Rate fetching examples">
+  **USD to EUR rate:**
+  ```bash
+  curl http://localhost:8000/api/rate/USD/EUR
+  ```
+
+  **GBP to CAD rate:**
+  ```bash
+  curl http://localhost:8000/api/rate/GBP/CAD
+  ```
+
+  **EUR to CHF rate:**
+  ```bash
+  curl http://localhost:8000/api/rate/EUR/CHF
+  ```
+</Accordion>
+
+### List supported currencies
+
+Get a list of all currencies supported by the API.
+
+**Endpoint:** `GET /api/currencies`
+
+**Example request:**
+
+```bash
+curl http://localhost:8000/api/currencies
+```
+
+**Example response:**
+
+```json
+{
+  "currencies": [
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "AUD",
+    "CAD",
+    "CHF",
+    "CNY",
+    "SEK",
+    "NZD",
+    "NGN"
+  ]
+}
+```
+
+<Note>
+  The supported currencies list represents the intersection of currencies available across all configured providers. This ensures every currency can be converted reliably.
+</Note>
+
+## Rate averaging explained
+
+The Currency Converter API queries multiple providers simultaneously and averages their rates for accuracy.
+
+### How it works
+
+<Steps>
+  <Step title="Parallel provider fetch">
+    When you request a rate, the API queries all configured providers at once using `asyncio.gather()`:
+
+    ```python
+    # From application/services/rate_service.py
+    async def get_rate(self, from_currency: str, to_currency: str) -> ExchangeRate:
+        # Check cache first
+        cached = await self.cache.get_rate(from_currency, to_currency)
+        if cached:
+            return cached
+        
+        # Fetch from all providers in parallel
+        results = await asyncio.gather(
+            provider1.fetch_rate(from_currency, to_currency),
+            provider2.fetch_rate(from_currency, to_currency),
+            provider3.fetch_rate(from_currency, to_currency),
+            return_exceptions=True
+        )
+    ```
+  </Step>
+
+  <Step title="Filter successful responses">
+    Failed requests are excluded from averaging:
+
+    - Provider timeouts
+    - API errors
+    - Network failures
+
+    Only successful responses contribute to the final rate.
+  </Step>
+
+  <Step title="Calculate average">
+    The API computes the mean of successful rates:
+
+    **Example:**
+    - Fixer.io returns: `1.2500`
+    - OpenExchangeRates returns: `1.2520`
+    - CurrencyAPI fails (timeout)
+    - **Final rate**: `(1.2500 + 1.2520) / 2 = 1.2510`
+  </Step>
+
+  <Step title="Cache and return">
+    The averaged rate is:
+    - Cached in Redis (5-minute TTL)
+    - Stored in PostgreSQL (permanent history)
+    - Returned to you
+  </Step>
+</Steps>
+
+## Using with programming languages
+
+### Python
+
+```python
+import requests
+
+# Convert currency
+response = requests.get(
+    "http://localhost:8000/api/convert/USD/EUR/100"
+)
+data = response.json()
+
+print(f"Converted: {data['converted_amount']} {data['to_currency']}")
+print(f"Rate: {data['exchange_rate']}")
+```
+
+### JavaScript
+
+```javascript
+// Using fetch API
+fetch('http://localhost:8000/api/convert/USD/EUR/100')
+  .then(response => response.json())
+  .then(data => {
+    console.log(`Converted: ${data.converted_amount} ${data.to_currency}`);
+    console.log(`Rate: ${data.exchange_rate}`);
+  });
+```
+
+### Node.js
+
+```javascript
+const axios = require('axios');
+
+async function convertCurrency(from, to, amount) {
+  const response = await axios.get(
+    `http://localhost:8000/api/convert/${from}/${to}/${amount}`
+  );
+  
+  return response.data;
+}
+
+// Usage
+convertCurrency('USD', 'EUR', 100)
+  .then(data => console.log(data));
+```
+
+### Go
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "net/http"
+)
+
+type ConversionResponse struct {
+    FromCurrency    string  `json:"from_currency"`
+    ToCurrency      string  `json:"to_currency"`
+    OriginalAmount  float64 `json:"original_amount"`
+    ConvertedAmount float64 `json:"converted_amount"`
+    ExchangeRate    float64 `json:"exchange_rate"`
+}
+
+func main() {
+    resp, _ := http.Get("http://localhost:8000/api/convert/USD/EUR/100")
+    defer resp.Body.Close()
+    
+    var result ConversionResponse
+    json.NewDecoder(resp.Body).Decode(&result)
+    
+    fmt.Printf("Converted: %.2f %s\n", result.ConvertedAmount, result.ToCurrency)
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Cache responses on your end">
+    While the API caches rates for 5 minutes, you should implement your own caching layer if making frequent requests:
+
+    ```python
+    import time
+
+    class CurrencyCache:
+        def __init__(self, ttl=300):
+            self.cache = {}
+            self.ttl = ttl
+        
+        def get_rate(self, from_cur, to_cur):
+            key = f"{from_cur}_{to_cur}"
+            if key in self.cache:
+                data, timestamp = self.cache[key]
+                if time.time() - timestamp < self.ttl:
+                    return data
+            return None
+    ```
+  </Accordion>
+
+  <Accordion title="Handle errors gracefully">
+    Always check response status codes and handle errors:
+
+    ```python
+    response = requests.get(url)
+    
+    if response.status_code == 200:
+        return response.json()
+    elif response.status_code == 400:
+        print("Invalid currency code")
+    elif response.status_code == 503:
+        print("Service temporarily unavailable")
+    else:
+        print(f"Unexpected error: {response.status_code}")
+    ```
+  </Accordion>
+
+  <Accordion title="Validate currency codes first">
+    Before making conversion requests, fetch the supported currencies list and validate against it:
+
+    ```python
+    # Get supported currencies once at startup
+    supported = requests.get(
+        "http://localhost:8000/api/currencies"
+    ).json()["currencies"]
+
+    def is_supported(currency):
+        return currency.upper() in supported
+
+    # Validate before converting
+    if is_supported("USD") and is_supported("EUR"):
+        result = convert_currency("USD", "EUR", 100)
+    ```
+  </Accordion>
+
+  <Accordion title="Use uppercase currency codes">
+    While the API automatically converts currency codes to uppercase, send them in uppercase for consistency:
+
+    ```python
+    # Good
+    requests.get(".../convert/USD/EUR/100")
+
+    # Also works, but not recommended
+    requests.get(".../convert/usd/eur/100")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## API documentation
+
+The Currency Converter API provides interactive documentation:
+
+- **Swagger UI**: `http://localhost:8000/docs` - Test endpoints directly in your browser
+- **ReDoc**: `http://localhost:8000/redoc` - Read-only documentation with examples
+
+<Info>
+  Use the Swagger UI to explore endpoints, view request/response schemas, and test API calls without writing code.
+</Info>
+
+## Next steps
+
+- Learn about [error handling](/guides/error-handling) and status codes
+- Understand the [caching strategy](/guides/caching) for optimal performance

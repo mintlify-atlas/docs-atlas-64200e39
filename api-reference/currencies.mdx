@@ -1,0 +1,48 @@
+---
+title: Get supported currencies
+description: Get a list of all supported currency codes
+---
+
+## Endpoint
+
+```
+GET /api/currencies
+```
+
+Retrieves a list of all currency codes supported by the API. You can use this endpoint to validate currency codes before making conversion or rate requests.
+
+## Example request
+
+```bash
+curl -X GET "https://api.example.com/api/currencies"
+```
+
+## Response
+
+<ResponseField name="currencies" type="array">
+  List of currency codes
+</ResponseField>
+
+## Example response
+
+```json
+{
+  "currencies": [
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "AUD",
+    "CAD",
+    "CHF",
+    "CNY",
+    "SEK",
+    "NZD"
+  ]
+}
+```
+
+## Status codes
+
+- `200` - Successfully retrieved list of currencies
+- `500` - Internal server error

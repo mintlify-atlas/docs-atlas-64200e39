@@ -1,0 +1,579 @@
+---
+title: Error handling guide
+description: Understand error responses, HTTP status codes, and how to handle failures in the Currency Converter API
+---
+
+## Overview
+
+The Currency Converter API uses standard HTTP status codes and provides detailed error messages to help you diagnose and resolve issues. This guide covers all possible errors and how to handle them.
+
+## Error response format
+
+All error responses follow a consistent JSON structure:
+
+```json
+{
+  "detail": "Description of what went wrong"
+}
+```
+
+The `detail` field contains a human-readable error message explaining the issue.
+
+## HTTP status codes
+
+The API uses the following HTTP status codes:
+
+<ResponseField name="200" type="OK">
+  The request succeeded. The response body contains the requested data.
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  The request is invalid. Check your currency codes, amount format, or other parameters.
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  An unexpected error occurred on the server. Retry your request or contact support if the issue persists.
+</ResponseField>
+
+<ResponseField name="503" type="Service Unavailable">
+  The exchange rate providers are temporarily unavailable. The API will retry automatically.
+</ResponseField>
+
+## Common errors
+
+### Invalid currency code
+
+**Status code:** `400 Bad Request`
+
+**Cause:** You requested a currency that isn't supported by all providers.
+
+**Example request:**
+
+```bash
+curl http://localhost:8000/api/convert/USD/XYZ/100
+```
+
+**Example response:**
+
+```json
+{
+  "detail": "Currency XYZ is not supported"
+}
+```
+
+**How to fix:**
+
+<Steps>
+  <Step title="Get supported currencies">
+    Fetch the list of supported currencies:
+
+    ```bash
+    curl http://localhost:8000/api/currencies
+    ```
+  </Step>
+
+  <Step title="Validate before converting">
+    Check that both currencies are in the supported list before making conversion requests:
+
+    ```python
+    import requests
+
+    # Get supported currencies
+    response = requests.get("http://localhost:8000/api/currencies")
+    supported = response.json()["currencies"]
+
+    # Validate
+    from_currency = "USD"
+    to_currency = "EUR"
+
+    if from_currency in supported and to_currency in supported:
+        # Safe to convert
+        result = requests.get(
+            f"http://localhost:8000/api/convert/{from_currency}/{to_currency}/100"
+        )
+    else:
+        print(f"Currency not supported")
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The API only supports currencies available across **all** configured providers. This ensures reliable conversions without partial failures.
+</Note>
+
+### Invalid amount
+
+**Status code:** `422 Unprocessable Entity`
+
+**Cause:** The amount parameter is invalid (negative, zero, or not a number).
+
+**Example request:**
+
+```bash
+curl http://localhost:8000/api/convert/USD/EUR/-100
+```
+
+**Example response:**
+
+```json
+{
+  "detail": [
+    {
+      "type": "greater_than",
+      "loc": ["path", "amount"],
+      "msg": "Input should be greater than 0",
+      "input": "-100"
+    }
+  ]
+}
+```
+
+**How to fix:**
+
+- Ensure amount is a positive number greater than 0
+- Use decimal format with up to 2 decimal places
+- Avoid special characters or non-numeric values
+
+**Valid examples:**
+
+```bash
+# Integer amount
+curl http://localhost:8000/api/convert/USD/EUR/100
+
+# Decimal amount
+curl http://localhost:8000/api/convert/USD/EUR/100.50
+
+# Large amount
+curl http://localhost:8000/api/convert/USD/EUR/1000000
+```
+
+### Currency code length
+
+**Status code:** `422 Unprocessable Entity`
+
+**Cause:** Currency code is too short (less than 3 characters) or too long (more than 5 characters).
+
+**Example request:**
+
+```bash
+curl http://localhost:8000/api/convert/US/EUR/100
+```
+
+**Example response:**
+
+```json
+{
+  "detail": [
+    {
+      "type": "string_too_short",
+      "loc": ["path", "from_currency"],
+      "msg": "String should have at least 3 characters",
+      "input": "US"
+    }
+  ]
+}
+```
+
+**How to fix:**
+
+Use standard 3-letter ISO 4217 currency codes:
+
+- ✅ `USD`, `EUR`, `GBP`
+- ❌ `US`, `DOLLAR`, `$`
+
+### Provider service unavailable
+
+**Status code:** `503 Service Unavailable`
+
+**Cause:** All currency exchange providers failed to respond or returned errors.
+
+**Example response:**
+
+```json
+{
+  "detail": "Exchange rate service unavailable"
+}
+```
+
+**When this happens:**
+
+- All three providers (Fixer.io, OpenExchangeRates, CurrencyAPI) are down
+- Network connectivity issues
+- Provider API keys are invalid or expired
+- Rate limits exceeded on all providers
+
+**How to handle:**
+
+<AccordionGroup>
+  <Accordion title="Implement retry logic">
+    Retry the request with exponential backoff:
+
+    ```python
+    import time
+    import requests
+
+    def convert_with_retry(from_cur, to_cur, amount, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(
+                    f"http://localhost:8000/api/convert/{from_cur}/{to_cur}/{amount}"
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 503:
+                    # Service unavailable, retry
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    print(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    # Other error, don't retry
+                    return None
+            except requests.RequestException as e:
+                print(f"Request failed: {e}")
+                time.sleep(2 ** attempt)
+        
+        return None
+    ```
+  </Accordion>
+
+  <Accordion title="Use cached rates">
+    If you implement your own caching, fall back to cached rates when the service is unavailable:
+
+    ```python
+    def get_rate_with_fallback(from_cur, to_cur):
+        # Try to get fresh rate
+        response = requests.get(
+            f"http://localhost:8000/api/rate/{from_cur}/{to_cur}"
+        )
+        
+        if response.status_code == 200:
+            rate_data = response.json()
+            # Cache it
+            cache.set(f"{from_cur}_{to_cur}", rate_data)
+            return rate_data
+        
+        # Service unavailable, use cached rate
+        cached = cache.get(f"{from_cur}_{to_cur}")
+        if cached:
+            print("Using cached rate")
+            return cached
+        
+        raise Exception("No rate available")
+    ```
+  </Accordion>
+
+  <Accordion title="Check provider status">
+    Verify your provider API keys and rate limits:
+
+    ```bash
+    # Check Fixer.io status
+    curl "http://data.fixer.io/api/latest?access_key=YOUR_KEY"
+
+    # Check OpenExchangeRates status
+    curl "https://openexchangerates.org/api/latest.json?app_id=YOUR_APP_ID"
+
+    # Check CurrencyAPI status
+    curl "https://api.currencyapi.com/v3/latest?apikey=YOUR_KEY"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Internal server error
+
+**Status code:** `500 Internal Server Error`
+
+**Cause:** An unexpected error occurred in the API server.
+
+**Example response:**
+
+```json
+{
+  "detail": "Internal server error"
+}
+```
+
+**Common causes:**
+
+- Database connection failure
+- Redis connection failure
+- Unhandled exception in code
+- Configuration error
+
+**How to handle:**
+
+1. **Retry the request** - Transient errors may resolve themselves
+2. **Check server logs** - Look for detailed error messages:
+   ```bash
+   docker-compose -f docker/docker-compose.yml logs -f
+   ```
+3. **Verify services** - Ensure database and Redis are running:
+   ```bash
+   docker-compose -f docker/docker-compose.yml ps
+   ```
+
+## Error handling in code
+
+Here's how to implement comprehensive error handling in different languages:
+
+### Python
+
+```python
+import requests
+from typing import Optional, Dict
+
+def convert_currency(from_currency: str, to_currency: str, amount: float) -> Optional[Dict]:
+    """
+    Convert currency with comprehensive error handling.
+    
+    Returns:
+        dict: Conversion result or None if error occurred
+    """
+    try:
+        response = requests.get(
+            f"http://localhost:8000/api/convert/{from_currency}/{to_currency}/{amount}",
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        
+        elif response.status_code == 400:
+            error = response.json()
+            print(f"Invalid request: {error['detail']}")
+            return None
+        
+        elif response.status_code == 503:
+            print("Service temporarily unavailable. Please try again later.")
+            return None
+        
+        elif response.status_code == 500:
+            print("Server error. Please contact support.")
+            return None
+        
+        else:
+            print(f"Unexpected status code: {response.status_code}")
+            return None
+    
+    except requests.Timeout:
+        print("Request timed out. Please try again.")
+        return None
+    
+    except requests.ConnectionError:
+        print("Failed to connect to the API. Check your network connection.")
+        return None
+    
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+
+# Usage
+result = convert_currency("USD", "EUR", 100)
+if result:
+    print(f"Converted amount: {result['converted_amount']}")
+```
+
+### JavaScript
+
+```javascript
+async function convertCurrency(fromCurrency, toCurrency, amount) {
+  try {
+    const response = await fetch(
+      `http://localhost:8000/api/convert/${fromCurrency}/${toCurrency}/${amount}`
+    );
+
+    if (response.ok) {
+      return await response.json();
+    }
+
+    if (response.status === 400) {
+      const error = await response.json();
+      console.error(`Invalid request: ${error.detail}`);
+      return null;
+    }
+
+    if (response.status === 503) {
+      console.error('Service temporarily unavailable');
+      return null;
+    }
+
+    if (response.status === 500) {
+      console.error('Server error');
+      return null;
+    }
+
+    console.error(`Unexpected status: ${response.status}`);
+    return null;
+
+  } catch (error) {
+    console.error(`Request failed: ${error.message}`);
+    return null;
+  }
+}
+
+// Usage
+convertCurrency('USD', 'EUR', 100)
+  .then(result => {
+    if (result) {
+      console.log(`Converted: ${result.converted_amount}`);
+    }
+  });
+```
+
+## Domain exceptions
+
+The API defines domain-specific exceptions in the source code:
+
+```python
+# From domain/exceptions/currency.py
+
+class CurrencyException(Exception):
+    """Base exception for currency operations"""
+    pass
+
+class InvalidCurrencyError(CurrencyException):
+    """Raised when currency code is not supported"""
+    pass
+
+class ProviderError(CurrencyException):
+    """Raised when all providers fail"""
+    pass
+
+class CacheError(CurrencyException):
+    """Raised when cache operations fail"""
+    pass
+```
+
+These exceptions are caught by the error handlers and converted to appropriate HTTP responses:
+
+```python
+# From api/error_handlers.py
+
+@app.exception_handler(InvalidCurrencyError)
+async def invalid_currency_handler(request: Request, exc: InvalidCurrencyError):
+    return JSONResponse(
+        status_code=400,
+        content={'detail': str(exc)}
+    )
+
+@app.exception_handler(ProviderError)
+async def provider_error_handler(request: Request, exc: ProviderError):
+    logger.error(f'Provider error: {exc}')
+    return JSONResponse(
+        status_code=503,
+        content={'detail': 'Exchange rate service unavailable'}
+    )
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Always validate input">
+    Validate currency codes and amounts before making API calls:
+
+    ```python
+    def validate_currency_code(code: str) -> bool:
+        return len(code) == 3 and code.isalpha() and code.isupper()
+
+    def validate_amount(amount: float) -> bool:
+        return amount > 0 and amount < 1e12  # Reasonable upper limit
+
+    # Use validation
+    if validate_currency_code("USD") and validate_amount(100):
+        result = convert_currency("USD", "EUR", 100)
+    ```
+  </Accordion>
+
+  <Accordion title="Log errors for debugging">
+    Maintain detailed logs of API errors:
+
+    ```python
+    import logging
+
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    def convert_with_logging(from_cur, to_cur, amount):
+        logger.info(f"Converting {amount} {from_cur} to {to_cur}")
+        
+        response = requests.get(f".../{from_cur}/{to_cur}/{amount}")
+        
+        if response.status_code != 200:
+            logger.error(
+                f"Conversion failed: {response.status_code} - {response.text}"
+            )
+        
+        return response
+    ```
+  </Accordion>
+
+  <Accordion title="Set appropriate timeouts">
+    Configure request timeouts to avoid hanging:
+
+    ```python
+    # Set timeout to 10 seconds
+    response = requests.get(url, timeout=10)
+    ```
+  </Accordion>
+
+  <Accordion title="Handle rate limits">
+    If you're making many requests, respect rate limits:
+
+    ```python
+    import time
+
+    class RateLimiter:
+        def __init__(self, calls_per_minute=60):
+            self.calls_per_minute = calls_per_minute
+            self.calls = []
+        
+        def wait_if_needed(self):
+            now = time.time()
+            # Remove calls older than 1 minute
+            self.calls = [c for c in self.calls if now - c < 60]
+            
+            if len(self.calls) >= self.calls_per_minute:
+                sleep_time = 60 - (now - self.calls[0])
+                time.sleep(sleep_time)
+            
+            self.calls.append(now)
+
+    limiter = RateLimiter(calls_per_minute=50)
+
+    def convert_with_rate_limit(from_cur, to_cur, amount):
+        limiter.wait_if_needed()
+        return requests.get(f".../{from_cur}/{to_cur}/{amount}")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Monitoring and debugging
+
+### Check server logs
+
+View detailed error logs from the API:
+
+```bash
+# View all logs
+docker-compose -f docker/docker-compose.yml logs -f
+
+# View last 100 lines
+docker-compose -f docker/docker-compose.yml logs --tail=100
+
+# Filter for errors
+docker-compose -f docker/docker-compose.yml logs | grep ERROR
+```
+
+### Test error scenarios
+
+Use the API documentation to test error handling:
+
+1. Visit `http://localhost:8000/docs`
+2. Try invalid currency codes
+3. Test negative amounts
+4. Observe error responses
+
+## Next steps
+
+- Learn about [caching strategies](/guides/caching) to improve performance
+- Review the [setup guide](/guides/setup) for configuration options

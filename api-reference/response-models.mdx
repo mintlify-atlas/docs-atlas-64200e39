@@ -1,0 +1,106 @@
+---
+title: Response models
+description: Response model schemas for the Currency Converter API
+---
+
+## ConversionResponse
+
+This model represents the response returned after a successful currency conversion request. You receive this model with all the conversion details including the converted amount and exchange rate.
+
+### Fields
+
+<ResponseField name="from_currency" type="string" required>
+  Source currency code used in the conversion.
+</ResponseField>
+
+<ResponseField name="to_currency" type="string" required>
+  Target currency code used in the conversion.
+</ResponseField>
+
+<ResponseField name="original_amount" type="decimal" required>
+  Original amount requested for conversion.
+</ResponseField>
+
+<ResponseField name="converted_amount" type="decimal" required>
+  Converted amount in the target currency.
+</ResponseField>
+
+<ResponseField name="exchange_rate" type="decimal" required>
+  Exchange rate used for conversion.
+</ResponseField>
+
+<ResponseField name="timestamp" type="datetime" required>
+  When the rate was fetched.
+</ResponseField>
+
+<ResponseField name="source" type="string" required>
+  Providers of rates.
+</ResponseField>
+
+### Example
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "amount": 100.00,
+  "converted_amount": 85.50,
+  "exchange_rate": 0.8550,
+  "timestamp": "2025-09-27T10:30:00Z"
+}
+```
+
+## ExchangeRateResponse
+
+This model represents the response returned when requesting exchange rate information between two currencies. You receive this model when querying the current exchange rate without performing a conversion.
+
+### Fields
+
+<ResponseField name="from_currency" type="string" required>
+  Source currency code.
+</ResponseField>
+
+<ResponseField name="to_currency" type="string" required>
+  Target currency code.
+</ResponseField>
+
+<ResponseField name="rate" type="decimal" required>
+  Exchange rate used for conversion.
+</ResponseField>
+
+<ResponseField name="timestamp" type="datetime" required>
+  When the rate was fetched.
+</ResponseField>
+
+<ResponseField name="source" type="string" required>
+  Providers of rates.
+</ResponseField>
+
+### Example
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "exchange_rate": 0.8550,
+  "timestamp": "2025-09-27T10:30:00Z"
+}
+```
+
+## SupportedCurrenciesResponse
+
+This model represents the response returned when requesting the list of supported currencies. You receive this model to discover which currency codes are available for conversion.
+
+### Fields
+
+<ResponseField name="currencies" type="list[string]" required>
+  List of currency codes supported by the API.
+</ResponseField>
+
+### Example
+
+```json
+{
+  "currencies": ["USD", "EUR", "GBP", "JPY"]
+}
+```

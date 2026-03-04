@@ -1,0 +1,46 @@
+---
+title: Request models
+description: Request model schemas for the Currency Converter API
+---
+
+## ConversionRequest
+
+This model represents the request body for currency conversion operations. You use this model when requesting to convert an amount from one currency to another.
+
+### Fields
+
+<ParamField path="from_currency" type="string" required>
+  The source currency code. Must be between 3 and 5 characters. The value is automatically converted to uppercase.
+  
+  **Validation:**
+  - Minimum length: 3 characters
+  - Maximum length: 5 characters
+  - Must be different from `to_currency`
+</ParamField>
+
+<ParamField path="to_currency" type="string" required>
+  The target currency code. Must be between 3 and 5 characters. The value is automatically converted to uppercase.
+  
+  **Validation:**
+  - Minimum length: 3 characters
+  - Maximum length: 5 characters
+  - Must be different from `from_currency`
+</ParamField>
+
+<ParamField path="amount" type="decimal" required>
+  The amount to convert. Must be a positive number greater than 0. The value is automatically rounded to 2 decimal places.
+  
+  **Validation:**
+  - Must be greater than 0
+  - Automatically rounded to 2 decimal places
+</ParamField>
+
+### Example
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "NGN",
+  "amount": 100.00
+}
+```

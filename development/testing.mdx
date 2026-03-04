@@ -1,0 +1,482 @@
+---
+title: Testing guide
+description: Learn how to run tests, write new test cases, and ensure code quality
+---
+
+The Currency Converter API uses `pytest` with async support for comprehensive unit and integration testing.
+
+## Running tests
+
+### Run all tests
+
+Execute the entire test suite:
+
+```bash
+pytest
+```
+
+Pytest will automatically discover and run all test files matching the pattern `test_*.py` or `*_test.py`.
+
+### Run with coverage
+
+Generate a coverage report to see which code is tested:
+
+```bash
+pytest --cov=. --cov-report=html
+```
+
+Open the coverage report in your browser:
+
+```bash
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
+```
+
+### Run specific tests
+
+<CodeGroup>
+  ```bash Single test file
+  pytest tests/unit/infrastructure/providers/test_fixerio.py
+  ```
+
+  ```bash Single test function
+  pytest tests/unit/infrastructure/providers/test_fixerio.py::test_fetch_rate_success_returns_decimal
+  ```
+
+  ```bash Tests matching a pattern
+  pytest -k "fetch_rate"
+  ```
+
+  ```bash Verbose output
+  pytest -v
+  ```
+</CodeGroup>
+
+## Test structure
+
+Tests are organized by layer and component:
+
+```
+tests/
+└── unit/
+    └── infrastructure/
+        ├── cache/
+        │   └── test_redis_cache.py       # Redis cache service tests
+        ├── providers/
+        │   └── test_fixerio.py           # Provider implementation tests
+        └── repositories/
+            └── test_currency_repository.py # Repository tests
+```
+
+<Note>
+  Currently, the project focuses on unit tests for infrastructure components. Integration and end-to-end tests can be added as needed.
+</Note>
+
+## Pytest configuration
+
+The project's `pyproject.toml` includes pytest configuration:
+
+```toml pyproject.toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = "."
+```
+
+- **`asyncio_mode = "auto"`** - Automatically runs async test functions without needing `@pytest.mark.asyncio` decorator
+- **`pythonpath = "."`** - Ensures imports work correctly from the project root
+
+<Tip>
+  While `asyncio_mode = "auto"` is enabled, it's still good practice to include `@pytest.mark.asyncio` for clarity when reading tests.
+</Tip>
+
+## Writing provider tests
+
+Provider tests mock HTTP responses at the client level, avoiding real network calls.
+
+### Example: Testing successful rate fetch
+
+```python tests/unit/infrastructure/providers/test_fixerio.py
+import pytest
+from decimal import Decimal
+from unittest.mock import Mock, AsyncMock
+import httpx
+
+from infrastructure.providers.fixerio import FixerIOProvider
+from domain.exceptions.currency import ProviderError
+
+
+@pytest.mark.asyncio
+async def test_fetch_rate_success_returns_decimal():
+    # Create a mock HTTP client
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        'success': True,
+        'base': 'USD',
+        'rates': {'EUR': 0.85}
+    }
+    mock_response.raise_for_status = Mock()
+    mock_client.get.return_value = mock_response
+
+    # Inject the mock client
+    provider = FixerIOProvider(api_key='test_key', client=mock_client)
+
+    # Test the fetch
+    rate = await provider.fetch_rate('USD', 'EUR')
+
+    # Assertions
+    assert rate == Decimal('0.85')
+    assert isinstance(rate, Decimal)
+    mock_client.get.assert_called_once()
+```
+
+### Testing error scenarios
+
+<Steps>
+  <Step title="API-level errors">
+    Test when the provider's API returns an error response:
+
+    ```python
+    @pytest.mark.asyncio
+    async def test_fetch_rate_api_returns_error():
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            'success': False,
+            'error': {
+                'code': 101,
+                'info': 'Invalid API key'
+            }
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client.get.return_value = mock_response
+
+        provider = FixerIOProvider(api_key="invalid_key", client=mock_client)
+
+        with pytest.raises(ProviderError) as exc_info:
+            await provider.fetch_rate('USD', 'EUR')
+
+        assert 'Invalid API key' in str(exc_info.value)
+    ```
+  </Step>
+
+  <Step title="HTTP errors">
+    Test handling of HTTP status errors:
+
+    ```python
+    @pytest.mark.asyncio
+    async def test_fetch_rate_http_500_error():
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+
+        error_response = Mock()
+        error_response.status_code = 500
+        error_response.text = 'Internal Server Error'
+
+        mock_client.get.side_effect = httpx.HTTPStatusError(
+            'Server error',
+            request=Mock(),
+            response=error_response
+        )
+
+        provider = FixerIOProvider(api_key='test_key', client=mock_client)
+
+        with pytest.raises(ProviderError) as exc_info:
+            await provider.fetch_rate('USD', 'EUR')
+
+        assert 'HTTP error 500' in str(exc_info.value)
+    ```
+  </Step>
+
+  <Step title="Network errors">
+    Test handling of connection and timeout errors:
+
+    ```python
+    @pytest.mark.asyncio
+    async def test_fetch_rate_network_timeout():
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get.side_effect = httpx.TimeoutException('Request timed out')
+
+        provider = FixerIOProvider(api_key='test_key', client=mock_client)
+
+        with pytest.raises(ProviderError) as exc_info:
+            await provider.fetch_rate('USD', 'EUR')
+
+        assert 'request failed' in str(exc_info.value).lower()
+    ```
+  </Step>
+</Steps>
+
+## Writing cache tests
+
+Cache tests mock Redis operations to verify caching logic without requiring a real Redis instance.
+
+### Example: Testing cache hit
+
+```python tests/unit/infrastructure/cache/test_redis_cache.py
+import pytest
+import json
+from datetime import datetime
+from decimal import Decimal
+from unittest.mock import AsyncMock
+
+from infrastructure.cache.redis_cache import RedisCacheService
+from domain.models.currency import ExchangeRate
+
+
+@pytest.mark.asyncio
+async def test_get_rate_cache_hit_returns_exchange_rate():
+    # Mock Redis client
+    mock_redis = AsyncMock()
+    cached_data = json.dumps({
+        'from_currency': 'USD',
+        'to_currency': 'EUR',
+        'rate': '0.85',
+        'timestamp': '2025-11-05T10:30:00',
+        'source': 'fixerio'
+    })
+    mock_redis.get.return_value = cached_data
+
+    # Create cache service with mock
+    cache_service = RedisCacheService(redis_client=mock_redis)
+    result = await cache_service.get_rate('USD', 'EUR')
+
+    # Verify result
+    assert result is not None
+    assert isinstance(result, ExchangeRate)
+    assert result.from_currency == 'USD'
+    assert result.to_currency == 'EUR'
+    assert result.rate == Decimal('0.85')
+    assert isinstance(result.rate, Decimal)
+
+    # Verify Redis was called correctly
+    mock_redis.get.assert_called_once_with('rate:USD:EUR')
+```
+
+### Testing cache miss
+
+```python
+@pytest.mark.asyncio
+async def test_get_rate_cache_miss_returns_none():
+    mock_redis = AsyncMock()
+    mock_redis.get.return_value = None
+
+    cache_service = RedisCacheService(redis_client=mock_redis)
+    result = await cache_service.get_rate('USD', 'EUR')
+
+    assert result is None
+    mock_redis.get.assert_called_once_with('rate:USD:EUR')
+```
+
+### Testing cache write with TTL
+
+```python
+@pytest.mark.asyncio
+async def test_set_rate_serializes_and_stores_with_ttl():
+    from datetime import timedelta
+
+    mock_redis = AsyncMock()
+    cache_service = RedisCacheService(redis_client=mock_redis)
+
+    # Create rate to cache
+    rate = ExchangeRate(
+        from_currency='USD',
+        to_currency='EUR',
+        rate=Decimal('0.85'),
+        timestamp=datetime(2025, 11, 5, 10, 30, 0),
+        source='fixerio'
+    )
+
+    await cache_service.set_rate(rate)
+
+    # Verify Redis was called with correct parameters
+    mock_redis.setex.assert_called_once()
+    call_args = mock_redis.setex.call_args
+
+    key = call_args[0][0]
+    ttl = call_args[0][1]
+    stored_data = call_args[0][2]
+
+    assert key == 'rate:USD:EUR'
+    assert ttl == timedelta(minutes=5)
+
+    # Verify stored data is correct
+    stored_dict = json.loads(stored_data)
+    assert stored_dict['rate'] == '0.85'
+```
+
+## Decimal precision testing
+
+The API uses `Decimal` for all rate calculations to avoid floating-point precision issues. Always test that `Decimal` precision is preserved:
+
+```python
+@pytest.mark.asyncio
+async def test_fetch_rate_with_very_small_rate():
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        'success': True,
+        'rates': {'XXX': 0.00001234}
+    }
+    mock_response.raise_for_status = Mock()
+    mock_client.get.return_value = mock_response
+
+    provider = FixerIOProvider(api_key='test_key', client=mock_client)
+    rate = await provider.fetch_rate('USD', 'XXX')
+
+    assert rate == Decimal('0.00001234')
+    assert str(rate) == '0.00001234'  # Verify no precision loss
+```
+
+<Warning>
+  Always convert float values to `Decimal` via `str()` first: `Decimal(str(float_value))`. Never use `Decimal(float_value)` directly, as this can introduce precision errors.
+</Warning>
+
+## Code quality tools
+
+### Linting and formatting
+
+The project uses `ruff` for both linting and formatting:
+
+```bash
+# Check for lint issues
+ruff check .
+
+# Auto-fix lint issues
+ruff check . --fix
+
+# Format code
+ruff format .
+```
+
+Ruff configuration is in `pyproject.toml`:
+
+```toml pyproject.toml
+[tool.ruff]
+line-length = 100
+exclude = ["tests"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "tab"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # Pyflakes
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "I",    # isort
+]
+```
+
+### Type checking
+
+Run `mypy` to verify type annotations:
+
+```bash
+mypy --config-file=pyproject.toml --package=api --package=application --package=domain --package=infrastructure
+```
+
+### Security scanning
+
+Use `bandit` to scan for common security issues:
+
+```bash
+bandit -r . -x tests
+```
+
+## Pre-commit hooks
+
+The project includes pre-commit hooks to enforce code quality before committing:
+
+<Steps>
+  <Step title="Install pre-commit">
+    ```bash
+    pip install pre-commit
+    ```
+  </Step>
+
+  <Step title="Install hooks">
+    ```bash
+    pre-commit install
+    pre-commit install --hook-type commit-msg  # for commitizen
+    ```
+  </Step>
+
+  <Step title="Run manually (optional)">
+    Test hooks on all files:
+    ```bash
+    pre-commit run --all-files
+    ```
+  </Step>
+</Steps>
+
+The hooks automatically run on `git commit` and enforce:
+- Trailing whitespace removal
+- Ruff lint and format
+- Mypy type checking
+- Bandit security scan
+- Conventional commit message format
+
+## Testing best practices
+
+<CardGroup cols={2}>
+  <Card title="Async mode" icon="bolt">
+    All test functions run as async automatically due to `asyncio_mode = "auto"`. Don't mix sync and async helpers without being intentional.
+  </Card>
+
+  <Card title="Mock at boundaries" icon="shield">
+    Mock external dependencies (HTTP clients, Redis, database) rather than internal functions to ensure realistic tests.
+  </Card>
+
+  <Card title="Test edge cases" icon="triangle-exclamation">
+    Test boundary conditions: empty responses, very large/small values, malformed data, and error states.
+  </Card>
+
+  <Card title="Use fixtures" icon="puzzle-piece">
+    Create pytest fixtures for commonly used test objects to reduce duplication and improve maintainability.
+  </Card>
+</CardGroup>
+
+## Common testing pitfalls
+
+<AccordionGroup>
+  <Accordion title="Decimal precision loss">
+    **Problem**: Converting floats directly to Decimal loses precision.
+
+    ```python
+    # Wrong
+    rate = Decimal(0.85)  # May introduce precision errors
+
+    # Correct
+    rate = Decimal(str(0.85))  # Preserves precision
+    ```
+
+    The providers already handle this correctly, but remember it when writing new tests.
+  </Accordion>
+
+  <Accordion title="Session lifecycle in tests">
+    **Problem**: Holding an `AsyncSession` open too long or not closing it properly.
+
+    **Solution**: Use the `get_db_session()` dependency pattern which manages commit/rollback/close automatically, or use pytest fixtures with proper cleanup.
+  </Accordion>
+
+  <Accordion title="Mixing sync and async">
+    **Problem**: Calling sync functions in async tests or vice versa.
+
+    **Solution**: Be consistent with async/await. If you need to test sync code, create separate sync test functions.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Adding providers" icon="plug" href="/development/adding-providers">
+    Learn how to add new exchange rate providers
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Understand the system architecture
+  </Card>
+</CardGroup>

@@ -1,0 +1,389 @@
+---
+title: Layer responsibilities
+description: Detailed breakdown of each layer's role in the 4-layer architecture
+---
+
+The Currency Converter API follows a strict 4-layer architecture where each layer has a single, well-defined responsibility. This page documents what each layer does and provides real code examples.
+
+## Layer 1: API layer
+
+**Location:** `api/`  
+**Purpose:** HTTP interface and request/response handling
+
+The API layer is the entry point for all HTTP requests. It performs **no business logic** — it only validates input, calls a service, and shapes the response.
+
+### Components
+
+| File | Responsibility |
+|------|----------------|
+| `main.py` | FastAPI app creation, lifespan startup/shutdown |
+| `routes/currency.py` | HTTP endpoints, path parameter parsing |
+| `schemas/requests.py` | Pydantic input validation |
+| `schemas/responses.py` | Pydantic response shaping |
+| `dependencies.py` | Dependency injection wiring |
+| `error_handlers.py` | Maps domain exceptions to HTTP status codes |
+
+### Example: Route definition
+
+From `api/routes/currency.py:21`:
+
+```python
+@router.get(
+    '/convert/{from_currency}/{to_currency}/{amount}',
+    response_model=ConversionResponse,
+    status_code=status.HTTP_200_OK,
+    summary='Convert currency amount',
+)
+async def convert_currency(
+    from_currency: Annotated[
+        str,
+        Path(
+            min_length=3,
+            max_length=5,
+        ),
+    ],
+    to_currency: Annotated[
+        str,
+        Path(
+            min_length=3,
+            max_length=5,
+        ),
+    ],
+    amount: Annotated[
+        Decimal,
+        Path(
+            gt=0,
+            decimal_places=2,
+        ),
+    ],
+    service: Annotated[ConversionService, Depends(get_conversion_service)],
+) -> ConversionResponse:
+    from_currency = from_currency.upper()
+    to_currency = to_currency.upper()
+    result = await service.convert(amount, from_currency, to_currency)
+    return ConversionResponse(**result)
+```
+
+<Note>
+  Notice how the route **delegates all logic** to `ConversionService`. The route only normalizes input (uppercase) and shapes the response.
+</Note>
+
+### Example: Application startup
+
+From `api/main.py:22`:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info('Starting Currency Converter API...')
+
+    init_dependencies()
+
+    deps.db = Database(settings.DATABASE_URL)
+    if deps.db is None:
+        raise RuntimeError('Database not initialized')
+    await deps.db.create_tables()
+    logger.info('Database tables created')
+
+    await bootstrap()
+
+    logger.info('Application ready')
+
+    yield
+
+    logger.info('Shutting down...')
+    await cleanup_dependencies()
+```
+
+<Info>
+  The lifespan context manager ensures resources are properly initialized at startup and cleaned up at shutdown.
+</Info>
+
+## Layer 2: Application layer
+
+**Location:** `application/services/`  
+**Purpose:** Business logic orchestration and use case implementation
+
+The application layer contains services that orchestrate domain objects and infrastructure components to fulfill business requirements.
+
+### Services
+
+| Service | Responsibility |
+|---------|----------------|
+| `CurrencyService` | Managing supported currencies, validating currency codes |
+| `RateService` | Fetching, aggregating, and caching exchange rates |
+| `ConversionService` | Orchestrating end-to-end currency conversion |
+
+### Example: Currency validation
+
+From `application/services/currency_service.py:45`:
+
+```python
+async def validate_currency(self, code: str) -> None:
+    supported = await self.get_supported_currencies()
+    if code not in supported:
+        raise InvalidCurrencyError(f'Currency {code} is not supported')
+```
+
+### Example: Rate aggregation with retry logic
+
+From `application/services/rate_service.py:30`:
+
+```python
+async def get_rate(self, from_currency: str, to_currency: str) -> ExchangeRate:
+    await self.currency_service.validate_currency(from_currency)
+    await self.currency_service.validate_currency(to_currency)
+
+    cached_rate = await self.repository.cache.get_rate(from_currency, to_currency)
+    if cached_rate:
+        logger.info(f'Cache HIT: {from_currency}/{to_currency}')
+        return cached_rate
+
+    logger.info(f'Cache MISS: {from_currency}/{to_currency}, fetching from providers')
+
+    aggregated = await self._aggregate_rates(from_currency, to_currency)
+
+    rate = ExchangeRate(
+        from_currency=aggregated.from_currency,
+        to_currency=aggregated.to_currency,
+        rate=aggregated.rate,
+        timestamp=aggregated.timestamp,
+        source='averaged' if len(aggregated.sources) > 1 else aggregated.sources[0],
+    )
+
+    await self.repository.save_rate(rate)
+
+    return rate
+```
+
+The retry decorator from `application/services/rate_service.py:55`:
+
+```python
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+)
+async def _fetch_from_provider(
+    self, provider: ExchangeRateProvider, from_currency: str, to_currency: str
+) -> Decimal | None:
+    try:
+        return await provider.fetch_rate(from_currency, to_currency)
+    except Exception as e:
+        logger.error(f'Provider {provider.name} failed: {e}')
+        return None
+```
+
+<Accordion title="Understanding the retry strategy">
+  The service uses **tenacity** for resilient external API calls:
+  - 3 attempts maximum
+  - Exponential backoff: 1s → 2s → 4s (max 10s)
+  - Only retries `ConnectionError` / `TimeoutError`
+  - Does **not** retry `ProviderError` (API-level errors like invalid keys)
+</Accordion>
+
+### Example: Conversion orchestration
+
+From `application/services/conversion_service.py:12`:
+
+```python
+async def convert(self, amount: Decimal, from_currency: str, to_currency: str) -> dict:
+    await self.currency_service.validate_currency(from_currency)
+    await self.currency_service.validate_currency(to_currency)
+
+    rate = await self.rate_service.get_rate(from_currency, to_currency)
+
+    converted_amount = amount * rate.rate
+
+    return {
+        'from_currency': from_currency,
+        'to_currency': to_currency,
+        'original_amount': amount,
+        'converted_amount': converted_amount,
+        'exchange_rate': rate.rate,
+        'timestamp': rate.timestamp,
+        'source': rate.source,
+    }
+```
+
+## Layer 3: Domain layer
+
+**Location:** `domain/`  
+**Purpose:** Core business entities and rules, framework-agnostic
+
+The domain layer is **completely framework-free**. No FastAPI, SQLAlchemy, or Redis — just plain Python dataclasses and exceptions. This makes it trivially testable.
+
+### Components
+
+| Module | Responsibility |
+|--------|----------------|
+| `models/currency.py` | Frozen dataclasses: `ExchangeRate`, `SupportedCurrency`, `AggregatedRate` |
+| `exceptions/currency.py` | Typed exceptions: `InvalidCurrencyError`, `ProviderError`, `CacheError` |
+
+### Example: Domain models
+
+From `domain/models/currency.py:6`:
+
+```python
+@dataclass(frozen=True)
+class ExchangeRate:
+    from_currency: str
+    to_currency: str
+    rate: Decimal
+    timestamp: datetime
+    source: str
+
+
+@dataclass(frozen=True)
+class SupportedCurrency:
+    code: str
+    name: str | None
+
+
+@dataclass(frozen=True)
+class AggregatedRate:
+    from_currency: str
+    to_currency: str
+    rate: Decimal  # The averaged/final rate
+    timestamp: datetime
+    sources: list[str]  # Which providers contributed
+    individual_rates: dict[str, Decimal]
+```
+
+<Info>
+  Models are **frozen** to ensure immutability, preventing accidental state changes throughout the application lifecycle.
+</Info>
+
+## Layer 4: Infrastructure layer
+
+**Location:** `infrastructure/`  
+**Purpose:** External systems integration (databases, caches, APIs)
+
+The infrastructure layer handles all interaction with external systems. It implements protocols defined by the application layer and translates between external formats and domain models.
+
+### Components
+
+| Module | Responsibility |
+|--------|----------------|
+| `providers/` | HTTP clients for each exchange rate API |
+| `cache/redis_cache.py` | Redis read/write with TTL management |
+| `persistence/database.py` | SQLAlchemy async engine and session factory |
+| `persistence/models/` | ORM table definitions |
+| `persistence/repositories/` | All database and cache queries |
+
+### Example: Provider protocol
+
+From `infrastructure/providers/base.py:5`:
+
+```python
+class ExchangeRateProvider(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal: ...
+
+    async def fetch_supported_currencies(self) -> list[dict[str, str]]: ...
+
+    async def close(self) -> None: ...
+```
+
+### Example: Provider implementation
+
+From `infrastructure/providers/fixerio.py:43`:
+
+```python
+async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal:
+    data = await self._request('latest', {'base': from_currency, 'symbols': to_currency})
+    try:
+        return Decimal(str(data['rates'][to_currency]))
+    except KeyError as e:
+        raise ProviderError(f'Missing rate for {to_currency}') from e
+```
+
+<Note>
+  Each provider owns its own `httpx.AsyncClient` and translates its API's error format into `ProviderError`, isolating implementation details from the rest of the system.
+</Note>
+
+### Example: Redis cache service
+
+From `infrastructure/cache/redis_cache.py:20`:
+
+```python
+async def get_rate(self, from_currency: str, to_currency: str) -> ExchangeRate | None:
+    key = self._make_rate_key(from_currency, to_currency)
+    data = await self.redis.get(key)
+
+    if not data:
+        return None
+
+    try:
+        rate_dict = json.loads(data)
+        return ExchangeRate(
+            from_currency=rate_dict['from_currency'],
+            to_currency=rate_dict['to_currency'],
+            rate=Decimal(rate_dict['rate']),
+            timestamp=datetime.fromisoformat(rate_dict['timestamp']),
+            source=rate_dict['source'],
+        )
+    except json.decoder.JSONDecodeError as e:
+        raise CacheError('Invalid json data decoded') from e
+```
+
+## Dependency flow
+
+The dependency injection system wires everything together. From `api/dependencies.py:82`:
+
+```python
+# Singletons (startup, live for app lifetime)
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    if deps.db is None:
+        raise RuntimeError('Database is not initialized')
+
+    session = deps.db.session_factory()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+# Per-request dependencies
+async def get_conversion_service(
+    rate_service: Annotated[RateService, Depends(get_rate_service)],
+    currency_service: Annotated[CurrencyService, Depends(get_currency_service)],
+) -> ConversionService:
+    return ConversionService(rate_service=rate_service, currency_service=currency_service)
+```
+
+<Accordion title="Singleton vs per-request dependencies">
+  **Singletons** (created at startup):
+  - `deps.db` → Database engine + session factory
+  - `deps.redis_cache` → RedisCacheService
+  - `deps.providers` → Provider instances
+
+  **Per-request** (created for each HTTP request):
+  - `AsyncSession` → Database session
+  - `CurrencyRepository` → Repository with session and cache
+  - All service instances → Fresh for each request
+
+  FastAPI resolves the full dependency graph automatically.
+</Accordion>
+
+## Benefits of this architecture
+
+<CardGroup cols={2}>
+  <Card title="Testability" icon="vial">
+    Each layer can be tested independently with minimal mocking
+  </Card>
+  <Card title="Flexibility" icon="arrows-rotate">
+    Swap implementations without touching other layers
+  </Card>
+  <Card title="Clarity" icon="lightbulb">
+    Every component has a single, well-defined responsibility
+  </Card>
+  <Card title="Maintainability" icon="wrench">
+    Changes are predictable and localized to specific layers
+  </Card>
+</CardGroup>

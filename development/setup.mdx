@@ -1,0 +1,310 @@
+---
+title: Development setup
+description: Set up your local development environment for the Currency Converter API
+---
+
+This guide walks you through setting up the Currency Converter API for local development.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Python 3.12** or higher
+- **Docker & Docker Compose** (for running PostgreSQL and Redis)
+- **Git** for version control
+
+You'll also need API keys from all three exchange rate providers:
+
+<CardGroup cols={3}>
+  <Card title="Fixer.io" icon="key" href="https://fixer.io/">
+    Free tier available
+  </Card>
+  <Card title="OpenExchangeRates" icon="key" href="https://openexchangerates.org/">
+    Free tier available
+  </Card>
+  <Card title="CurrencyAPI" icon="key" href="https://currencyapi.com/">
+    Free tier available
+  </Card>
+</CardGroup>
+
+<Warning>
+  Fixer.io's free tier only supports EUR as the base currency. For testing with other base currencies, use OpenExchangeRates or CurrencyAPI as your primary provider during development.
+</Warning>
+
+## Clone the repository
+
+Start by cloning the repository and navigating to the project directory:
+
+```bash
+git clone https://github.com/yourorg/currency-converter.git
+cd currency-converter
+```
+
+## Set up Python environment
+
+<Steps>
+  <Step title="Create a virtual environment">
+    Create and activate a Python virtual environment:
+
+    <CodeGroup>
+      ```bash Linux/macOS
+      python -m venv .venv
+      source .venv/bin/activate
+      ```
+
+      ```bash Windows
+      python -m venv .venv
+      .venv\Scripts\activate
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all required Python packages:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    Key dependencies include:
+    - `fastapi[all]` - Web framework with ASGI server
+    - `sqlalchemy` & `asyncpg` - Async database ORM
+    - `alembic` - Database migrations
+    - `redis` - Redis client for caching
+    - `httpx` - Async HTTP client for providers
+    - `pytest` & `pytest-asyncio` - Testing framework
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example environment file and add your API keys:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` and fill in your configuration:
+
+    ```bash .env
+    # Application Settings
+    APP_NAME="Currency Converter Service"
+    DEBUG=true
+    ENVIRONMENT="development"
+
+    # Database Configuration
+    DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/currency_converter"
+
+    # Redis Configuration
+    REDIS_URL="redis://localhost:6379/0"
+
+    # API Provider Settings
+    FIXERIO_API_KEY="your_fixer_api_key_here"
+    OPENEXCHANGE_APP_ID="your_openexchange_app_id_here"
+    CURRENCYAPI_KEY="your_currencyapi_key_here"
+    ```
+
+    <Note>
+      Never commit the `.env` file to version control. It's already in `.gitignore`.
+    </Note>
+  </Step>
+</Steps>
+
+## Start infrastructure services
+
+The API requires PostgreSQL and Redis to run. You can start them using Docker Compose:
+
+```bash
+docker-compose -f docker/docker-compose.yml up -d
+```
+
+This command starts:
+- **PostgreSQL** on port `5432`
+- **Redis** on port `6379`
+
+Verify the services are running:
+
+```bash
+docker-compose -f docker/docker-compose.yml ps
+```
+
+<Tip>
+  To run only the infrastructure without the API container, use:
+  ```bash
+  docker-compose -f docker/docker-compose.yml up -d db redis
+  ```
+</Tip>
+
+## Run database migrations
+
+The project uses Alembic for managing database schema. Apply all migrations to create the necessary tables:
+
+```bash
+alembic upgrade head
+```
+
+This creates two main tables:
+- `supported_currencies` - List of all supported currency codes
+- `rate_history` - Historical exchange rate data
+
+### Common migration commands
+
+```bash
+# Create a new migration after modifying ORM models
+alembic revision --autogenerate -m "describe your change"
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Rollback the last migration
+alembic downgrade -1
+
+# View migration history
+alembic history
+```
+
+## Start the development server
+
+Run the API server with auto-reload enabled:
+
+```bash
+uvicorn api.main:app --reload
+```
+
+The API is now available at:
+- **API Base**: `http://localhost:8000`
+- **Interactive Docs**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+
+<Note>
+  On first startup, the API will automatically fetch supported currencies from all three providers and store them in the database and cache. This process is called "bootstrapping" and happens during the application lifespan startup.
+</Note>
+
+## Verify your setup
+
+Test the API with a simple conversion request:
+
+```bash
+curl http://localhost:8000/api/convert/USD/EUR/100
+```
+
+You should receive a response like:
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "amount": 100,
+  "converted_amount": 92.55,
+  "rate": 0.9255,
+  "timestamp": "2026-03-04T10:30:00"
+}
+```
+
+## Configuration details
+
+All configuration is managed through `config/settings.py` using `pydantic-settings`. The `Settings` class reads values from environment variables or the `.env` file:
+
+```python config/settings.py
+class Settings(BaseSettings):
+    DATABASE_URL: str = 'sqlite+aiosqlite:///./currency_converter.db'
+    REDIS_URL: str = 'redis://localhost:6379'
+    FIXERIO_API_KEY: str = ''
+    OPENEXCHANGE_APP_ID: str = ''
+    CURRENCYAPI_KEY: str = ''
+    APP_NAME: str = 'Currency Converter API'
+    DEBUG: bool = True
+
+    model_config = SettingsConfigDict(
+        env_file='.env',
+        case_sensitive=False,
+        extra='ignore'
+    )
+```
+
+The `get_settings()` function is decorated with `@lru_cache`, ensuring settings are loaded only once per process.
+
+## Development without Docker
+
+If you prefer not to use Docker, you can install PostgreSQL and Redis locally:
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    # Install via Homebrew
+    brew install postgresql@14 redis
+
+    # Start services
+    brew services start postgresql@14
+    brew services start redis
+    ```
+  </Tab>
+
+  <Tab title="Ubuntu/Debian">
+    ```bash
+    # Install packages
+    sudo apt update
+    sudo apt install postgresql redis-server
+
+    # Start services
+    sudo systemctl start postgresql
+    sudo systemctl start redis-server
+    ```
+  </Tab>
+
+  <Tab title="Windows">
+    Download and install:
+    - PostgreSQL: https://www.postgresql.org/download/windows/
+    - Redis: https://github.com/microsoftarchive/redis/releases
+  </Tab>
+</Tabs>
+
+Update your `.env` file with the appropriate connection strings for your local installations.
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Bootstrap failure - providers unreachable">
+    If providers are unreachable at startup (e.g., bad API keys), the app will raise `ProviderError` and exit.
+
+    **Solution**: Verify your API keys in the `.env` file are correct and that you have an active internet connection.
+  </Accordion>
+
+  <Accordion title="Database connection errors">
+    If you see connection errors, ensure:
+    - PostgreSQL is running: `docker-compose ps`
+    - The `DATABASE_URL` in `.env` matches your setup
+    - The database exists: `createdb currency_converter`
+  </Accordion>
+
+  <Accordion title="Redis connection refused">
+    Ensure Redis is running and accessible:
+    ```bash
+    docker-compose -f docker/docker-compose.yml ps redis
+    redis-cli ping  # Should return PONG
+    ```
+  </Accordion>
+
+  <Accordion title="Import errors after installing dependencies">
+    Make sure your virtual environment is activated:
+    ```bash
+    source .venv/bin/activate  # Linux/macOS
+    .venv\Scripts\activate     # Windows
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Testing guide" icon="flask" href="/development/testing">
+    Learn how to run tests and write new test cases
+  </Card>
+  <Card title="Adding providers" icon="plug" href="/development/adding-providers">
+    Add support for new exchange rate providers
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Understand the system architecture
+  </Card>
+  <Card title="API reference" icon="code" href="/api-reference/convert">
+    Explore the API endpoints
+  </Card>
+</CardGroup>

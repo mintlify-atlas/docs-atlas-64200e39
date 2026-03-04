@@ -1,0 +1,266 @@
+---
+title: Currency Converter API Documentation
+description: Production-ready currency conversion service with multi-provider aggregation, smart caching, and clean architecture
+mode: custom
+---
+
+<div className="relative bg-gradient-to-br from-[#0454cc] via-[#0454cc] to-[#0565e6] dark:from-[#0f1117] dark:via-[#0454cc]/20 dark:to-[#0f1117] py-20 overflow-hidden">
+  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjA1IiBzdHJva2Utd2lkdGg9IjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-30"></div>
+  
+  <div className="relative max-w-6xl mx-auto px-6 sm:px-8">
+    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-12">
+      <div className="flex-1 max-w-2xl">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
+          Currency Converter API
+        </h1>
+        <p className="text-lg sm:text-xl text-white/90 mb-8 max-w-xl leading-relaxed">
+          Production-ready currency conversion service that aggregates exchange rates from multiple providers to ensure reliability and accuracy.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-white text-[#0454cc] font-semibold hover:bg-white/90 transition-colors shadow-lg"
+          >
+            Get Started
+            <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </a>
+          <a 
+            href="/api-reference/convert" 
+            className="inline-flex items-center px-6 py-3 rounded-lg border-2 border-white/30 bg-white/10 text-white font-semibold hover:bg-white/20 hover:border-white/50 transition-colors backdrop-blur-sm"
+          >
+            API Reference
+          </a>
+        </div>
+      </div>
+      
+      <div className="hidden lg:block lg:flex-shrink-0">
+        <div className="w-64 h-64 bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 p-6 shadow-2xl">
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="text-white/60 text-xs font-medium">Multi-Provider</div>
+                <div className="text-white text-sm font-semibold">3 Aggregated Sources</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="text-white/60 text-xs font-medium">Smart Caching</div>
+                <div className="text-white text-sm font-semibold">5-Minute TTL</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="text-white/60 text-xs font-medium">Reliability</div>
+                <div className="text-white text-sm font-semibold">Automatic Fallback</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Quick start
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get up and running with the Currency Converter API in minutes
+  </p>
+
+  <Steps>
+    <Step title="Set up with Docker Compose">
+      Clone the repository and configure your environment variables with API keys from your chosen providers.
+
+      ```bash
+      git clone https://github.com/DanielPopoola/currency_converter.git
+      cd currency_converter
+      cp docker/.env.example docker/.env
+      ```
+
+      Edit `docker/.env` and add your API keys:
+      ```bash
+      FIXERIO_API_KEY=your_fixer_key_here
+      OPENEXCHANGE_APP_ID=your_openexchange_key_here
+      CURRENCYAPI_KEY=your_currencyapi_key_here
+      ```
+    </Step>
+
+    <Step title="Start the services">
+      Launch PostgreSQL, Redis, and the FastAPI server using Docker Compose.
+
+      ```bash
+      docker-compose -f docker/docker-compose.yml up --build
+      ```
+
+      The API will be available at `http://localhost:8000` with automatic database migrations and currency initialization.
+    </Step>
+
+    <Step title="Make your first conversion">
+      Convert 100 USD to EUR using the conversion endpoint.
+
+      ```bash cURL
+      curl -X GET "http://localhost:8000/api/convert/USD/EUR/100"
+      ```
+
+      <Accordion title="Example Response">
+        ```json
+        {
+          "from_currency": "USD",
+          "to_currency": "EUR",
+          "original_amount": 100.00,
+          "converted_amount": 92.50,
+          "exchange_rate": 0.925,
+          "timestamp": "2025-03-04T10:30:00Z",
+          "source": "averaged"
+        }
+        ```
+      </Accordion>
+    </Step>
+
+    <Step title="Explore the API">
+      Access the interactive API documentation at `http://localhost:8000/docs` to explore all available endpoints and test them directly in your browser.
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Key features
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Built for reliability, accuracy, and developer experience
+  </p>
+
+  <CardGroup cols={2}>
+    <Card title="Multi-provider aggregation" icon="layer-group" href="/architecture/providers">
+      Fetches rates from Fixer.io, OpenExchange, and CurrencyAPI in parallel, then averages results for maximum accuracy.
+    </Card>
+    <Card title="Smart caching" icon="bolt" href="/guides/caching">
+      Redis cache with 5-minute TTL minimizes API calls and ensures fast response times for repeated requests.
+    </Card>
+    <Card title="Clean architecture" icon="cubes" href="/architecture/layers">
+      4-layer design (API, Application, Domain, Infrastructure) keeps code maintainable and testable.
+    </Card>
+    <Card title="Automatic fallback" icon="shield-halved" href="/guides/error-handling">
+      If one provider fails, the service seamlessly falls back to others to ensure uninterrupted availability.
+    </Card>
+    <Card title="Historical tracking" icon="clock-rotate-left" href="/architecture/database">
+      PostgreSQL stores all fetched rates for historical analysis and audit trails.
+    </Card>
+    <Card title="Type safety" icon="shield-check" href="/api-reference/response-models">
+      Full type hints with Pydantic validation ensure data integrity across all layers.
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Explore by topic
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Deep dive into architecture, guides, and API reference
+  </p>
+
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <a href="/architecture/overview" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#0454cc] dark:hover:border-[#0454cc] overflow-hidden no-underline transition-colors bg-white dark:bg-[#1a1d27]">
+      <div className="h-40 bg-gradient-to-br from-[#0454cc] to-[#0565e6] flex items-center justify-center">
+        <svg className="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+      </div>
+      <div className="p-5">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Architecture</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Learn about the 4-layer clean architecture, provider strategy, and caching design.</p>
+        <div className="flex items-center text-sm font-medium text-[#0454cc] group-hover:text-[#0565e6]">
+          Explore architecture
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/guides/setup" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#0454cc] dark:hover:border-[#0454cc] overflow-hidden no-underline transition-colors bg-white dark:bg-[#1a1d27]">
+      <div className="h-40 bg-gradient-to-br from-[#fc4d2d] to-[#ff6b4a] flex items-center justify-center">
+        <svg className="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      </div>
+      <div className="p-5">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Guides</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Step-by-step guides for setup, usage, error handling, and caching strategies.</p>
+        <div className="flex items-center text-sm font-medium text-[#0454cc] group-hover:text-[#0565e6]">
+          View guides
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/api-reference/convert" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#0454cc] dark:hover:border-[#0454cc] overflow-hidden no-underline transition-colors bg-white dark:bg-[#1a1d27]">
+      <div className="h-40 bg-gradient-to-br from-[#fca494] to-[#ffb8a8] flex items-center justify-center">
+        <svg className="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+      </div>
+      <div className="p-5">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">API Reference</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Complete API documentation with request/response models and code examples.</p>
+        <div className="flex items-center text-sm font-medium text-[#0454cc] group-hover:text-[#0565e6]">
+          Browse API docs
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl border border-gray-200 dark:border-[#27272a] bg-gradient-to-br from-gray-50 to-white dark:from-[#1a1d27] dark:to-[#242838] p-8 sm:p-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Ready to get started?
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 mb-6 max-w-2xl">
+      Set up the Currency Converter API in minutes with Docker Compose, or dive into the architecture to understand how multi-provider aggregation works.
+    </p>
+    <div className="flex flex-wrap gap-4">
+      <a 
+        href="/quickstart" 
+        className="inline-flex items-center px-6 py-3 rounded-lg bg-[#0454cc] text-white font-semibold hover:bg-[#0565e6] transition-colors"
+      >
+        Get Started
+        <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </a>
+      <a 
+        href="https://github.com/DanielPopoola/currency_converter" 
+        className="inline-flex items-center px-6 py-3 rounded-lg border border-gray-300 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] text-gray-900 dark:text-white font-semibold hover:bg-gray-50 dark:hover:bg-[#242838] transition-colors"
+      >
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</div>

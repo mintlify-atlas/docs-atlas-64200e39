@@ -1,0 +1,83 @@
+---
+title: Convert currency
+description: Convert an amount from one currency to another using current exchange rates
+---
+
+## Endpoint
+
+```
+GET /api/convert/{from_currency}/{to_currency}/{amount}
+```
+
+Converts a specified amount from one currency to another using the current exchange rate. The endpoint returns the converted amount along with the exchange rate and timestamp.
+
+## Path parameters
+
+<ParamField path="from_currency" type="string" required>
+  Source currency code (e.g., USD, EUR, GBP). Must be 3-5 characters in length.
+</ParamField>
+
+<ParamField path="to_currency" type="string" required>
+  Target currency code (e.g., USD, EUR, GBP). Must be 3-5 characters in length.
+</ParamField>
+
+<ParamField path="amount" type="decimal" required>
+  Amount to convert. Must be greater than 0 with up to 2 decimal places.
+</ParamField>
+
+## Example request
+
+```bash
+curl -X GET "https://api.example.com/api/convert/USD/EUR/100.00"
+```
+
+## Response
+
+<ResponseField name="from_currency" type="string">
+  Source currency code
+</ResponseField>
+
+<ResponseField name="to_currency" type="string">
+  Target currency code
+</ResponseField>
+
+<ResponseField name="original_amount" type="decimal">
+  Original amount requested
+</ResponseField>
+
+<ResponseField name="converted_amount" type="decimal">
+  Converted amount
+</ResponseField>
+
+<ResponseField name="exchange_rate" type="decimal">
+  Exchange rate used for conversion
+</ResponseField>
+
+<ResponseField name="timestamp" type="datetime">
+  When the rate was fetched
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  Providers of rates
+</ResponseField>
+
+## Example response
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "original_amount": 100.00,
+  "converted_amount": 85.50,
+  "exchange_rate": 0.8550,
+  "timestamp": "2025-09-27T10:30:00Z",
+  "source": "external-api"
+}
+```
+
+## Status codes
+
+- `200` - Successful conversion
+- `400` - Invalid parameters (e.g., invalid currency code or amount)
+- `404` - Currency not supported
+- `500` - Internal server error

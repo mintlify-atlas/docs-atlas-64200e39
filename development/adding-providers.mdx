@@ -1,0 +1,528 @@
+---
+title: Adding new providers
+description: Step-by-step guide to integrating new exchange rate providers
+---
+
+The Currency Converter API is designed to work with multiple exchange rate providers. This guide shows you how to add support for a new provider.
+
+## Provider protocol
+
+All providers must implement the `ExchangeRateProvider` protocol defined in `infrastructure/providers/base.py`:
+
+```python infrastructure/providers/base.py
+from decimal import Decimal
+from typing import Protocol
+
+
+class ExchangeRateProvider(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal: ...
+
+    async def fetch_supported_currencies(self) -> list[dict[str, str]]: ...
+
+    async def close(self) -> None: ...
+```
+
+### Protocol requirements
+
+<ResponseField name="name" type="str" required>
+  A unique identifier for the provider (e.g., `"fixerio"`, `"openexchange"`)
+</ResponseField>
+
+<ResponseField name="fetch_rate" type="async method" required>
+  Fetches the exchange rate between two currencies. Returns a `Decimal` value. Must raise `ProviderError` on any failure.
+
+  **Parameters:**
+  - `from_currency: str` - Source currency code (e.g., `"USD"`)
+  - `to_currency: str` - Target currency code (e.g., `"EUR"`)
+
+  **Returns:** `Decimal` - The exchange rate
+</ResponseField>
+
+<ResponseField name="fetch_supported_currencies" type="async method" required>
+  Fetches the list of currencies supported by the provider. Must raise `ProviderError` on any failure.
+
+  **Returns:** `list[dict[str, str]]` - List of currency dictionaries with `code` and `name` keys
+
+  Example:
+  ```python
+  [
+      {"code": "USD", "name": "United States Dollar"},
+      {"code": "EUR", "name": "Euro"},
+      {"code": "GBP", "name": "British Pound Sterling"}
+  ]
+  ```
+</ResponseField>
+
+<ResponseField name="close" type="async method" required>
+  Cleans up resources, particularly the HTTP client. Called during application shutdown.
+</ResponseField>
+
+## Implementation guide
+
+Follow these steps to add a new provider:
+
+<Steps>
+  <Step title="Create the provider class">
+    Create a new file in `infrastructure/providers/` named after your provider (e.g., `yourprovider.py`):
+
+    ```python infrastructure/providers/yourprovider.py
+    from decimal import Decimal
+    import httpx
+
+    from domain.exceptions.currency import ProviderError
+
+
+    class YourProvider:
+        BASE_URL = "https://api.yourprovider.com/v1"
+
+        def __init__(self, api_key: str, client: httpx.AsyncClient | None = None, timeout: int = 10):
+            self.api_key = api_key
+            self._client = client or httpx.AsyncClient(timeout=timeout)
+
+        @property
+        def name(self) -> str:
+            return "yourprovider"
+
+        async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal:
+            # Implementation here
+            pass
+
+        async def fetch_supported_currencies(self) -> list[dict]:
+            # Implementation here
+            pass
+
+        async def close(self) -> None:
+            await self._client.aclose()
+    ```
+
+    <Note>
+      The `client` parameter allows dependency injection for testing. Always accept it as an optional parameter.
+    </Note>
+  </Step>
+
+  <Step title="Implement the request helper">
+    Create a private `_request()` method to handle HTTP calls and error conversion:
+
+    ```python
+    async def _request(self, endpoint: str, params: dict) -> dict:
+        params['api_key'] = self.api_key  # Add auth to params
+        url = f'{self.BASE_URL}/{endpoint}'
+
+        try:
+            response = await self._client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            # Check for API-level errors
+            if 'error' in data:
+                message = data.get('error', {}).get('message', 'Unknown error')
+                raise ProviderError(f'YourProvider API error: {message}')
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            raise ProviderError(
+                f'YourProvider HTTP error {e.response.status_code}: {e.response.text[:200]}'
+            ) from e
+        except httpx.RequestError as e:
+            raise ProviderError(f'YourProvider request failed: {e.__class__.__name__}') from e
+        except Exception as e:
+            raise ProviderError(f'YourProvider response parsing error: {str(e)}') from e
+    ```
+
+    <Warning>
+      Always convert all exceptions to `ProviderError`. This ensures consistent error handling throughout the application.
+    </Warning>
+  </Step>
+
+  <Step title="Implement fetch_rate">
+    Fetch the exchange rate and return it as a `Decimal`:
+
+    ```python
+    async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal:
+        data = await self._request('latest', {
+            'base': from_currency,
+            'symbols': to_currency
+        })
+
+        try:
+            # Extract rate from response (adjust based on API format)
+            rate_value = data['rates'][to_currency]
+            # CRITICAL: Convert via str to preserve precision
+            return Decimal(str(rate_value))
+        except KeyError as e:
+            raise ProviderError(f'Missing rate for {to_currency}') from e
+    ```
+
+    <Tip>
+      Always convert float values to `Decimal` via `str()`: `Decimal(str(float_value))`. Never use `Decimal(float_value)` directly.
+    </Tip>
+  </Step>
+
+  <Step title="Implement fetch_supported_currencies">
+    Fetch and return the list of supported currencies:
+
+    ```python
+    async def fetch_supported_currencies(self) -> list[dict]:
+        data = await self._request('currencies', {})
+
+        # Transform API response to standard format
+        return [
+            {'code': code, 'name': name}
+            for code, name in data['currencies'].items()
+        ]
+    ```
+  </Step>
+
+  <Step title="Export the provider">
+    Add your provider to `infrastructure/providers/__init__.py`:
+
+    ```python infrastructure/providers/__init__.py
+    from .base import ExchangeRateProvider
+    from .currencyapi import CurrencyAPIProvider
+    from .fixerio import FixerIOProvider
+    from .openexchange import OpenExchangeProvider
+    from .yourprovider import YourProvider  # Add this line
+
+    __all__ = [
+        'ExchangeRateProvider',
+        'CurrencyAPIProvider',
+        'FixerIOProvider',
+        'OpenExchangeProvider',
+        'YourProvider',  # Add this line
+    ]
+    ```
+  </Step>
+
+  <Step title="Add configuration">
+    Add the API key to `config/settings.py`:
+
+    ```python config/settings.py
+    class Settings(BaseSettings):
+        DATABASE_URL: str = 'sqlite+aiosqlite:///./currency_converter.db'
+        REDIS_URL: str = 'redis://localhost:6379'
+
+        FIXERIO_API_KEY: str = ''
+        OPENEXCHANGE_APP_ID: str = ''
+        CURRENCYAPI_KEY: str = ''
+        YOUR_API_KEY: str = ''  # Add this line
+
+        APP_NAME: str = 'Currency Converter API'
+        DEBUG: bool = True
+
+        model_config = SettingsConfigDict(
+            env_file='.env',
+            case_sensitive=False,
+            extra='ignore'
+        )
+    ```
+
+    And update your `.env` file:
+
+    ```bash .env
+    YOUR_API_KEY="your_api_key_here"
+    ```
+  </Step>
+
+  <Step title="Register the provider">
+    Register your provider in `api/dependencies.py`:
+
+    ```python api/dependencies.py
+    from infrastructure.providers import (
+        CurrencyAPIProvider,
+        ExchangeRateProvider,
+        FixerIOProvider,
+        OpenExchangeProvider,
+        YourProvider,  # Import your provider
+    )
+
+    def init_dependencies() -> None:
+        """Initialize all singleton dependencies. Called at app startup."""
+        logger.info('Initializing dependencies...')
+        settings = get_settings()
+
+        deps.db = Database(settings.DATABASE_URL)
+        deps.redis_client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        deps.redis_cache = RedisCacheService(deps.redis_client)
+
+        deps.providers = {
+            'fixerio': FixerIOProvider(settings.FIXERIO_API_KEY),
+            'openexchange': OpenExchangeProvider(settings.OPENEXCHANGE_APP_ID),
+            'currencyapi': CurrencyAPIProvider(settings.CURRENCYAPI_KEY),
+            'yourprovider': YourProvider(settings.YOUR_API_KEY),  # Register here
+        }
+        logger.info('Dependencies initialized')
+    ```
+
+    <Note>
+      The `RateService` automatically picks up all providers from the `providers` dict. No additional configuration is needed.
+    </Note>
+  </Step>
+
+  <Step title="Write tests">
+    Create unit tests in `tests/unit/infrastructure/providers/test_yourprovider.py`:
+
+    ```python tests/unit/infrastructure/providers/test_yourprovider.py
+    import pytest
+    from decimal import Decimal
+    from unittest.mock import Mock, AsyncMock
+    import httpx
+
+    from infrastructure.providers.yourprovider import YourProvider
+    from domain.exceptions.currency import ProviderError
+
+
+    @pytest.mark.asyncio
+    async def test_fetch_rate_success_returns_decimal():
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            'rates': {'EUR': 0.85}
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client.get.return_value = mock_response
+
+        provider = YourProvider(api_key='test_key', client=mock_client)
+        rate = await provider.fetch_rate('USD', 'EUR')
+
+        assert rate == Decimal('0.85')
+        assert isinstance(rate, Decimal)
+
+
+    @pytest.mark.asyncio
+    async def test_fetch_rate_api_error():
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            'error': {'message': 'Invalid API key'}
+        }
+        mock_response.raise_for_status = Mock()
+        mock_client.get.return_value = mock_response
+
+        provider = YourProvider(api_key='invalid_key', client=mock_client)
+
+        with pytest.raises(ProviderError) as exc_info:
+            await provider.fetch_rate('USD', 'EUR')
+
+        assert 'Invalid API key' in str(exc_info.value)
+    ```
+
+    Run your tests:
+    ```bash
+    pytest tests/unit/infrastructure/providers/test_yourprovider.py -v
+    ```
+  </Step>
+</Steps>
+
+## Real-world examples
+
+Study the existing provider implementations for reference:
+
+<CodeGroup>
+  ```python Fixer.io
+  class FixerIOProvider:
+      BASE_URL = 'http://data.fixer.io/api'
+
+      def __init__(self, api_key: str, client: httpx.AsyncClient | None = None, timeout: int = 10):
+          self.api_key = api_key
+          self._client = client or httpx.AsyncClient(timeout=timeout)
+
+      @property
+      def name(self) -> str:
+          return 'fixerio'
+
+      async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal:
+          data = await self._request('latest', {'base': from_currency, 'symbols': to_currency})
+          try:
+              return Decimal(str(data['rates'][to_currency]))
+          except KeyError as e:
+              raise ProviderError(f'Missing rate for {to_currency}') from e
+  ```
+
+  ```python OpenExchangeRates
+  class OpenExchangeProvider:
+      BASE_URL = 'https://openexchangerates.org/api'
+
+      def __init__(self, app_id: str, client: httpx.AsyncClient | None = None, timeout: int = 10):
+          self.app_id = app_id
+          self._client = client or httpx.AsyncClient(timeout=timeout)
+
+      @property
+      def name(self) -> str:
+          return 'openexchange'
+
+      async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal:
+          data = await self._request('latest.json', {'base': from_currency, 'symbols': to_currency})
+          try:
+              return Decimal(str(data['rates'][to_currency]))
+          except KeyError as e:
+              raise ProviderError(f'Missing rate for {to_currency}') from e
+  ```
+
+  ```python CurrencyAPI.com
+  class CurrencyAPIProvider:
+      BASE_URL = 'https://api.currencyapi.com/v3'
+
+      def __init__(self, api_key: str, client: httpx.AsyncClient | None = None, timeout: int = 10):
+          self.api_key = api_key
+          self._client = client or httpx.AsyncClient(
+              timeout=timeout,
+              headers={'apikey': api_key},  # Auth via header
+          )
+
+      @property
+      def name(self) -> str:
+          return 'currencyapi.com'
+
+      async def fetch_rate(self, from_currency: str, to_currency: str) -> Decimal:
+          data = await self._request(
+              'latest',
+              {'base_currency': from_currency, 'currencies': to_currency},
+          )
+          try:
+              rate_value = data['data'][to_currency]['value']
+              return Decimal(str(rate_value))
+          except KeyError as e:
+              raise ProviderError(f'Rate for {to_currency} not found') from e
+  ```
+</CodeGroup>
+
+## Provider integration details
+
+### How providers are used
+
+The `RateService` orchestrates provider calls:
+
+1. **Parallel fetching** - All providers are called simultaneously using `asyncio.gather()`
+2. **Failure tolerance** - If 1-2 providers fail, the service averages the remaining responses
+3. **Complete failure** - If all providers fail, a `ProviderError` is raised (HTTP 503)
+
+```python application/services/rate_service.py (simplified)
+async def _aggregate_rates(self, from_currency: str, to_currency: str) -> AggregatedRate:
+    tasks = [
+        self._fetch_with_fallback(provider, from_currency, to_currency)
+        for provider in [self.primary_provider] + self.secondary_providers
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    successful = [r for r in results if isinstance(r, ExchangeRate)]
+
+    if not successful:
+        raise ProviderError("All providers failed")
+
+    avg_rate = sum(r.rate for r in successful) / len(successful)
+    return AggregatedRate(rate=avg_rate, sources=[r.source for r in successful])
+```
+
+### Bootstrap process
+
+During application startup, the `bootstrap()` function fetches supported currencies from all providers:
+
+```python
+# Simplified from api/dependencies.py
+async def bootstrap() -> None:
+    async with deps.db.managed_session() as session:
+        repo = CurrencyRepository(db_session=session, cache_service=deps.redis_cache)
+        service = CurrencyService(repository=repo, providers=list(deps.providers.values()))
+        await service.initialize_supported_currencies()
+```
+
+This:
+1. Calls `fetch_supported_currencies()` on all providers in parallel
+2. Takes the intersection of currency codes (only currencies supported by ALL providers)
+3. Stores them in PostgreSQL and Redis cache (24-hour TTL)
+
+<Warning>
+  If all providers fail during bootstrap, the application will not start. Ensure your provider handles errors gracefully and has valid credentials.
+</Warning>
+
+## Testing your provider
+
+After implementation, verify your provider works:
+
+<Steps>
+  <Step title="Run unit tests">
+    ```bash
+    pytest tests/unit/infrastructure/providers/test_yourprovider.py -v
+    ```
+  </Step>
+
+  <Step title="Start the application">
+    ```bash
+    uvicorn api.main:app --reload
+    ```
+
+    Check the logs for successful provider initialization.
+  </Step>
+
+  <Step title="Test an API call">
+    ```bash
+    curl http://localhost:8000/api/convert/USD/EUR/100
+    ```
+
+    Your provider should be included in the rate aggregation.
+  </Step>
+
+  <Step title="Check provider stats">
+    If available, call the providers endpoint to see all active providers:
+    ```bash
+    curl http://localhost:8000/api/providers
+    ```
+  </Step>
+</Steps>
+
+## Common implementation pitfalls
+
+<AccordionGroup>
+  <Accordion title="Decimal precision loss">
+    **Problem**: Converting floats directly to Decimal loses precision.
+
+    ```python
+    # Wrong
+    return Decimal(rate_value)  # If rate_value is a float
+
+    # Correct
+    return Decimal(str(rate_value))
+    ```
+  </Accordion>
+
+  <Accordion title="Not converting all exceptions to ProviderError">
+    **Problem**: Letting raw HTTP or parsing exceptions bubble up breaks the service's error handling.
+
+    **Solution**: Wrap all exceptions in `ProviderError` in your `_request()` method.
+  </Accordion>
+
+  <Accordion title="Forgetting to inject the client for testing">
+    **Problem**: Hardcoding `httpx.AsyncClient()` in `__init__` makes testing difficult.
+
+    **Solution**: Always accept `client` as an optional parameter:
+    ```python
+    def __init__(self, api_key: str, client: httpx.AsyncClient | None = None):
+        self._client = client or httpx.AsyncClient(timeout=10)
+    ```
+  </Accordion>
+
+  <Accordion title="Not closing the HTTP client">
+    **Problem**: Not implementing `close()` leads to resource leaks.
+
+    **Solution**: Always implement:
+    ```python
+    async def close(self) -> None:
+        await self._client.aclose()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Testing guide" icon="flask" href="/development/testing">
+    Learn how to write comprehensive tests
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture/providers">
+    Understand the provider strategy
+  </Card>
+</CardGroup>

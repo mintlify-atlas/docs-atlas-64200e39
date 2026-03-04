@@ -1,0 +1,69 @@
+---
+title: Get exchange rate
+description: Get the current exchange rate between two currencies
+---
+
+## Endpoint
+
+```
+GET /api/rate/{from_currency}/{to_currency}
+```
+
+Retrieves the current exchange rate between two currencies without performing a conversion. You can use this endpoint to check rates before making a conversion.
+
+## Path parameters
+
+<ParamField path="from_currency" type="string" required>
+  Source currency code (e.g., USD, EUR, GBP). Must be 3-5 characters in length.
+</ParamField>
+
+<ParamField path="to_currency" type="string" required>
+  Target currency code (e.g., USD, EUR, GBP). Must be 3-5 characters in length.
+</ParamField>
+
+## Example request
+
+```bash
+curl -X GET "https://api.example.com/api/rate/USD/EUR"
+```
+
+## Response
+
+<ResponseField name="from_currency" type="string">
+  Source currency code
+</ResponseField>
+
+<ResponseField name="to_currency" type="string">
+  Target currency code
+</ResponseField>
+
+<ResponseField name="rate" type="decimal">
+  Exchange rate used for conversion
+</ResponseField>
+
+<ResponseField name="timestamp" type="datetime">
+  When the rate was fetched
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  Providers of rates
+</ResponseField>
+
+## Example response
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "rate": 0.8550,
+  "timestamp": "2025-09-27T10:30:00Z",
+  "source": "external-api"
+}
+```
+
+## Status codes
+
+- `200` - Successfully retrieved exchange rate
+- `400` - Invalid parameters (e.g., invalid currency code)
+- `404` - Currency not supported
+- `500` - Internal server error

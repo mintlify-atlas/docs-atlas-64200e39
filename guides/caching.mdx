@@ -1,0 +1,630 @@
+---
+title: Caching guide
+description: Learn how the Currency Converter API uses Redis caching to optimize performance and reduce external API calls
+---
+
+## Overview
+
+The Currency Converter API implements a sophisticated Redis-based caching strategy to minimize external API calls, reduce latency, and improve overall performance. This guide explains how caching works and how to optimize it.
+
+## Why caching matters
+
+Without caching, every conversion request would:
+
+1. Query 3 external providers in parallel
+2. Wait for network responses (100-500ms each)
+3. Process and average the rates
+4. Store in PostgreSQL
+
+With caching:
+
+1. Check Redis (< 5ms)
+2. Return cached rate immediately if available
+3. Only query providers when cache misses
+
+<Info>
+  Caching can reduce API response time from **500ms** to **5ms** - a **100x improvement**.
+</Info>
+
+## Cache architecture
+
+The API uses Redis for two types of caching:
+
+```
+┌─────────────────────────────────────┐
+│         Client Request              │
+└────────────┬────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────┐
+│      Check Redis Cache              │
+│  • Exchange rates (5 min TTL)       │
+│  • Supported currencies (24 hr TTL) │
+└────────────┬────────────────────────┘
+             │
+        ┌────┴────┐
+        │         │
+      Cache     Cache
+       HIT      MISS
+        │         │
+        │         ▼
+        │    ┌─────────────────────┐
+        │    │ Fetch from Providers│
+        │    │  • Fixer.io         │
+        │    │  • OpenExchange     │
+        │    │  • CurrencyAPI      │
+        │    └─────────┬───────────┘
+        │              │
+        │              ▼
+        │    ┌─────────────────────┐
+        │    │   Cache in Redis    │
+        │    │  Store in PostgreSQL│
+        │    └─────────┬───────────┘
+        │              │
+        └──────┬───────┘
+               │
+               ▼
+     ┌──────────────────┐
+     │  Return Response │
+     └──────────────────┘
+```
+
+## Cache implementation
+
+The caching logic is implemented in the `RedisCacheService` class:
+
+```python
+# From infrastructure/cache/redis_cache.py
+
+class RedisCacheService:
+    def __init__(self, redis_client: redis.Redis):
+        self.redis = redis_client
+        self.rate_ttl = timedelta(minutes=5)      # 5-minute cache
+        self.currency_ttl = timedelta(hours=24)   # 24-hour cache
+```
+
+### Cache TTL values
+
+<ParamField path="rate_ttl" type="duration" default="5 minutes">
+  Time-to-live for exchange rates. Rates are cached for 5 minutes to balance freshness with performance.
+</ParamField>
+
+<ParamField path="currency_ttl" type="duration" default="24 hours">
+  Time-to-live for supported currencies list. Currencies rarely change, so they're cached for 24 hours.
+</ParamField>
+
+## Exchange rate caching
+
+### Cache key pattern
+
+Exchange rates use a structured key format:
+
+```
+rate:{from_currency}:{to_currency}
+```
+
+**Examples:**
+
+- `rate:USD:EUR` - USD to EUR rate
+- `rate:GBP:JPY` - GBP to JPY rate
+- `rate:EUR:CHF` - EUR to CHF rate
+
+### Cache workflow
+
+<Steps>
+  <Step title="Generate cache key">
+    The API constructs a cache key from the currency pair:
+
+    ```python
+    def _make_rate_key(self, from_currency: str, to_currency: str) -> str:
+        return f'rate:{from_currency}:{to_currency}'
+    ```
+
+    Example: `rate:USD:EUR`
+  </Step>
+
+  <Step title="Check cache">
+    The API attempts to retrieve the cached rate:
+
+    ```python
+    async def get_rate(self, from_currency: str, to_currency: str) -> ExchangeRate | None:
+        key = self._make_rate_key(from_currency, to_currency)
+        data = await self.redis.get(key)
+        
+        if not data:
+            return None  # Cache miss
+        
+        # Parse cached data
+        rate_dict = json.loads(data)
+        return ExchangeRate(
+            from_currency=rate_dict['from_currency'],
+            to_currency=rate_dict['to_currency'],
+            rate=Decimal(rate_dict['rate']),
+            timestamp=datetime.fromisoformat(rate_dict['timestamp']),
+            source=rate_dict['source'],
+        )
+    ```
+  </Step>
+
+  <Step title="Store in cache on miss">
+    If cache misses, the API fetches from providers and caches the result:
+
+    ```python
+    async def set_rate(self, rate: ExchangeRate) -> None:
+        key = self._make_rate_key(rate.from_currency, rate.to_currency)
+        
+        rate_dict = {
+            'from_currency': rate.from_currency,
+            'to_currency': rate.to_currency,
+            'rate': str(rate.rate),
+            'timestamp': rate.timestamp.isoformat(),
+            'source': rate.source,
+        }
+        
+        # Store with 5-minute TTL
+        await self.redis.setex(key, self.rate_ttl, json.dumps(rate_dict))
+    ```
+  </Step>
+</Steps>
+
+### Cache data format
+
+Rates are stored in Redis as JSON:
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "rate": "0.925",
+  "timestamp": "2026-03-04T10:30:00",
+  "source": "averaged"
+}
+```
+
+<Note>
+  The `Decimal` type is serialized as a string to preserve precision during JSON encoding.
+</Note>
+
+## Supported currencies caching
+
+### Cache key
+
+Supported currencies use a simple key:
+
+```
+currencies:supported
+```
+
+### Cache workflow
+
+<Steps>
+  <Step title="Check cache">
+    The API checks for cached currencies:
+
+    ```python
+    async def get_supported_currencies(self) -> list[str] | None:
+        data = await self.redis.get('currencies:supported')
+        if not data:
+            return None
+        
+        return json.loads(data)
+    ```
+  </Step>
+
+  <Step title="Store on miss">
+    If cache misses, fetch from providers and cache for 24 hours:
+
+    ```python
+    async def set_supported_currencies(self, currencies: list[str]) -> None:
+        await self.redis.setex(
+            'currencies:supported',
+            self.currency_ttl,
+            json.dumps(currencies)
+        )
+    ```
+  </Step>
+</Steps>
+
+### Cache data format
+
+Currencies are stored as a JSON array:
+
+```json
+["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "SEK", "NZD"]
+```
+
+## Configuration
+
+Caching behavior can be configured through environment variables.
+
+### Redis connection
+
+```bash
+# .env file
+REDIS_URL="redis://localhost:6379/0"
+```
+
+The URL format is:
+
+```
+redis://[username:password@]host:port/database
+```
+
+**Examples:**
+
+```bash
+# Local Redis without auth
+REDIS_URL="redis://localhost:6379/0"
+
+# Remote Redis with password
+REDIS_URL="redis://:mypassword@redis.example.com:6379/0"
+
+# Redis with username and password
+REDIS_URL="redis://user:pass@redis.example.com:6379/0"
+```
+
+### Cache TTL
+
+Adjust cache durations in your `.env` file:
+
+```bash
+# Default: 300 seconds (5 minutes)
+CACHE_TTL=300
+```
+
+<Warning>
+  Setting `CACHE_TTL` too high may result in stale exchange rates. Setting it too low increases provider API calls and costs.
+</Warning>
+
+## Cache operations
+
+### View cached data
+
+Connect to Redis and inspect cached values:
+
+```bash
+# Connect to Redis CLI
+docker-compose -f docker/docker-compose.yml exec redis redis-cli
+
+# List all keys
+KEYS *
+
+# Get a specific rate
+GET rate:USD:EUR
+
+# Get supported currencies
+GET currencies:supported
+
+# Check TTL of a key
+TTL rate:USD:EUR
+
+# Count all keys
+DBSIZE
+```
+
+### Clear cache
+
+Manually clear cached data:
+
+```bash
+# Clear specific rate
+DEL rate:USD:EUR
+
+# Clear all rates
+KEYS rate:* | xargs redis-cli DEL
+
+# Clear supported currencies
+DEL currencies:supported
+
+# Flush entire database (use with caution!)
+FLUSHDB
+```
+
+<Warning>
+  Clearing the cache forces the API to fetch fresh data from providers. This increases latency and API usage.
+</Warning>
+
+### Monitor cache performance
+
+Track cache hit/miss ratios:
+
+```bash
+# Get Redis stats
+INFO stats
+
+# Monitor commands in real-time
+MONITOR
+```
+
+## Performance optimization
+
+### Adjust TTL based on usage
+
+Different use cases require different TTL values:
+
+<AccordionGroup>
+  <Accordion title="High-frequency trading applications">
+    Use shorter TTL for fresher rates:
+
+    ```bash
+    CACHE_TTL=60  # 1 minute
+    ```
+
+    **Trade-offs:**
+    - ✅ More accurate rates
+    - ❌ Higher provider API usage
+    - ❌ Increased costs
+  </Accordion>
+
+  <Accordion title="Informational displays">
+    Use longer TTL for less critical applications:
+
+    ```bash
+    CACHE_TTL=900  # 15 minutes
+    ```
+
+    **Trade-offs:**
+    - ✅ Reduced API costs
+    - ✅ Lower latency
+    - ❌ Potentially stale rates
+  </Accordion>
+
+  <Accordion title="Historical analysis">
+    For historical data, cache can be very long:
+
+    ```bash
+    CACHE_TTL=86400  # 24 hours
+    ```
+
+    **Trade-offs:**
+    - ✅ Minimal API usage
+    - ✅ Very fast responses
+    - ❌ Not suitable for real-time needs
+  </Accordion>
+</AccordionGroup>
+
+### Pre-warm cache
+
+For frequently requested currency pairs, pre-populate the cache:
+
+```python
+import asyncio
+import requests
+
+# Common currency pairs
+POPULAR_PAIRS = [
+    ("USD", "EUR"),
+    ("USD", "GBP"),
+    ("USD", "JPY"),
+    ("EUR", "GBP"),
+    ("EUR", "USD"),
+]
+
+async def warm_cache():
+    """Pre-fetch popular currency pairs to warm the cache"""
+    for from_cur, to_cur in POPULAR_PAIRS:
+        url = f"http://localhost:8000/api/rate/{from_cur}/{to_cur}"
+        response = requests.get(url)
+        print(f"Warmed cache: {from_cur}/{to_cur}")
+        await asyncio.sleep(0.1)  # Small delay to avoid overwhelming providers
+
+# Run at application startup
+asyncio.run(warm_cache())
+```
+
+### Implement client-side caching
+
+Complement server-side caching with client-side caching:
+
+```python
+import time
+from typing import Dict, Tuple
+
+class ClientCache:
+    def __init__(self, ttl: int = 60):
+        self.cache: Dict[str, Tuple[dict, float]] = {}
+        self.ttl = ttl
+    
+    def get(self, from_cur: str, to_cur: str) -> dict | None:
+        key = f"{from_cur}_{to_cur}"
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                return data
+        return None
+    
+    def set(self, from_cur: str, to_cur: str, data: dict):
+        key = f"{from_cur}_{to_cur}"
+        self.cache[key] = (data, time.time())
+
+# Usage
+cache = ClientCache(ttl=60)
+
+def get_rate(from_cur: str, to_cur: str) -> dict:
+    # Check client cache first
+    cached = cache.get(from_cur, to_cur)
+    if cached:
+        print("Client cache hit")
+        return cached
+    
+    # Fetch from API
+    response = requests.get(f"http://localhost:8000/api/rate/{from_cur}/{to_cur}")
+    data = response.json()
+    
+    # Store in client cache
+    cache.set(from_cur, to_cur, data)
+    return data
+```
+
+## Cache invalidation
+
+### Automatic expiration
+
+Redis automatically removes expired keys based on TTL:
+
+```python
+# Rate expires after 5 minutes
+await self.redis.setex(key, timedelta(minutes=5), data)
+```
+
+### Manual invalidation
+
+Invalidate cache when needed:
+
+```python
+import redis.asyncio as redis
+
+async def invalidate_rate(from_currency: str, to_currency: str):
+    """Manually remove a rate from cache"""
+    redis_client = redis.from_url("redis://localhost:6379/0")
+    key = f"rate:{from_currency}:{to_currency}"
+    await redis_client.delete(key)
+    print(f"Invalidated cache for {from_currency}/{to_currency}")
+```
+
+### Cache warming strategy
+
+Re-populate cache before expiration to avoid cache stampede:
+
+```python
+import asyncio
+from datetime import datetime, timedelta
+
+async def background_cache_refresh():
+    """Refresh cache in background before expiration"""
+    while True:
+        # Wait 4 minutes (cache expires in 5)
+        await asyncio.sleep(240)
+        
+        # Refresh popular pairs
+        for from_cur, to_cur in POPULAR_PAIRS:
+            try:
+                url = f"http://localhost:8000/api/rate/{from_cur}/{to_cur}"
+                requests.get(url)
+                print(f"Refreshed: {from_cur}/{to_cur}")
+            except Exception as e:
+                print(f"Failed to refresh {from_cur}/{to_cur}: {e}")
+```
+
+## Monitoring and debugging
+
+### Check cache hit ratio
+
+Monitor how effectively your cache is being used:
+
+```bash
+# Redis CLI
+INFO stats
+```
+
+Look for:
+
+```
+keyspace_hits:1234
+keyspace_misses:56
+```
+
+Calculate hit ratio:
+
+```
+Hit Ratio = hits / (hits + misses)
+          = 1234 / (1234 + 56)
+          = 95.7%
+```
+
+<Info>
+  A good cache hit ratio is **above 90%**. If yours is lower, consider increasing TTL or pre-warming the cache.
+</Info>
+
+### View cache memory usage
+
+```bash
+# Check memory usage
+INFO memory
+
+# Get database size
+DBSIZE
+
+# Check specific key size
+MEMORY USAGE rate:USD:EUR
+```
+
+### Debug cache issues
+
+```python
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# Add cache debugging
+async def get_rate_with_debug(from_cur: str, to_cur: str):
+    key = f"rate:{from_cur}:{to_cur}"
+    
+    # Check cache
+    cached = await redis_client.get(key)
+    if cached:
+        logger.info(f"Cache HIT: {key}")
+        return json.loads(cached)
+    
+    logger.info(f"Cache MISS: {key}")
+    
+    # Fetch and cache
+    rate = await fetch_from_providers(from_cur, to_cur)
+    await redis_client.setex(key, 300, json.dumps(rate))
+    logger.info(f"Cached: {key}")
+    
+    return rate
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use appropriate TTL values">
+    Balance freshness with performance:
+
+    - **Real-time trading**: 30-60 seconds
+    - **E-commerce**: 5-15 minutes
+    - **Reporting**: 1-24 hours
+  </Accordion>
+
+  <Accordion title="Monitor cache health">
+    Set up alerts for:
+
+    - Low hit ratio (< 80%)
+    - High memory usage (> 80%)
+    - Connection failures
+    - Slow response times
+  </Accordion>
+
+  <Accordion title="Implement fallback strategies">
+    Handle cache failures gracefully:
+
+    ```python
+    try:
+        cached = await redis_client.get(key)
+        if cached:
+            return json.loads(cached)
+    except redis.RedisError as e:
+        logger.warning(f"Cache error: {e}")
+        # Continue to fetch from providers
+    
+    # Fetch from providers as fallback
+    return await fetch_from_providers(from_cur, to_cur)
+    ```
+  </Accordion>
+
+  <Accordion title="Use cache for read-heavy operations">
+    Cache is most effective for:
+
+    - Popular currency pairs (USD/EUR, USD/GBP)
+    - Repeated conversions of same amounts
+    - Multiple clients requesting same data
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+- Review [error handling](/guides/error-handling) for cache-related errors
+- Learn about [API usage](/guides/usage) patterns
+- Check the [setup guide](/guides/setup) for Redis configuration
