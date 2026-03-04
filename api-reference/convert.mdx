@@ -5,7 +5,7 @@ description: Convert an amount from one currency to another using current exchan
 
 ## Endpoint
 
-```
+```http
 GET /api/convert/{from_currency}/{to_currency}/{amount}
 ```
 
@@ -28,7 +28,7 @@ Converts a specified amount from one currency to another using the current excha
 ## Example request
 
 ```bash
-curl -X GET "https://api.example.com/api/convert/USD/EUR/100.00"
+curl -X GET "http://localhost:8000/api/convert/USD/EUR/100.00"
 ```
 
 ## Response
@@ -71,13 +71,14 @@ curl -X GET "https://api.example.com/api/convert/USD/EUR/100.00"
   "converted_amount": 85.50,
   "exchange_rate": 0.8550,
   "timestamp": "2025-09-27T10:30:00Z",
-  "source": "external-api"
+  "source": "averaged"
 }
 ```
 
 ## Status codes
 
 - `200` - Successful conversion
-- `400` - Invalid parameters (e.g., invalid currency code or amount)
-- `404` - Currency not supported
+- `400` - Invalid currency code (currency not supported)
+- `422` - Invalid parameters (e.g., negative amount, invalid format)
 - `500` - Internal server error
+- `503` - Exchange rate service unavailable (all providers failed)

@@ -5,7 +5,7 @@ description: Get the current exchange rate between two currencies
 
 ## Endpoint
 
-```
+```http
 GET /api/rate/{from_currency}/{to_currency}
 ```
 
@@ -24,7 +24,7 @@ Retrieves the current exchange rate between two currencies without performing a 
 ## Example request
 
 ```bash
-curl -X GET "https://api.example.com/api/rate/USD/EUR"
+curl -X GET "http://localhost:8000/api/rate/USD/EUR"
 ```
 
 ## Response
@@ -57,13 +57,14 @@ curl -X GET "https://api.example.com/api/rate/USD/EUR"
   "to_currency": "EUR",
   "rate": 0.8550,
   "timestamp": "2025-09-27T10:30:00Z",
-  "source": "external-api"
+  "source": "averaged"
 }
 ```
 
 ## Status codes
 
 - `200` - Successfully retrieved exchange rate
-- `400` - Invalid parameters (e.g., invalid currency code)
-- `404` - Currency not supported
+- `400` - Invalid currency code (currency not supported)
+- `422` - Invalid parameters (e.g., invalid currency format)
 - `500` - Internal server error
+- `503` - Exchange rate service unavailable (all providers failed)
