@@ -1,0 +1,92 @@
+{
+  "projectType": "api-service",
+  "projectName": "Currency Converter API",
+  "projectDescription": "A production-ready currency conversion service built with FastAPI that aggregates exchange rates from multiple providers to ensure reliability and accuracy.",
+  "theme": "aspen",
+  "primaryColor": "#0454cc",
+  "lightColor": "#fc4d2d",
+  "darkColor": "#fca494",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/setup",
+              "guides/usage",
+              "guides/error-handling",
+              "guides/caching"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/layers",
+              "architecture/providers",
+              "architecture/caching-strategy",
+              "architecture/database"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api-reference/convert",
+              "api-reference/rate",
+              "api-reference/currencies"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "api-reference/request-models",
+              "api-reference/response-models"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/setup",
+              "development/testing",
+              "development/adding-providers"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-provider aggregation with automatic fallback between Fixer.io, OpenExchange, and CurrencyAPI",
+    "Smart Redis caching with 5-minute TTL to minimize API calls",
+    "Clean 4-layer architecture (API, Application, Domain, Infrastructure)",
+    "PostgreSQL persistence for historical rate tracking",
+    "Exponential backoff retry logic for transient network errors",
+    "Type-safe Pydantic validation with full type hints",
+    "Parallel rate fetching with rate averaging for accuracy"
+  ],
+  "publicApiSurface": [
+    "GET /api/convert/{from_currency}/{to_currency}/{amount}",
+    "GET /api/rate/{from_currency}/{to_currency}",
+    "GET /api/currencies"
+  ]
+}
